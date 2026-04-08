@@ -1,0 +1,14 @@
+{
+  "version": "0.4.0",
+  "commit_sha": "ab2aa1b3b6453eca98e2fac9056b2f7df6028d56",
+  "deployed_at": "2026-04-08T15:21:34Z",
+  "deployed_by": "jack@terrene.foundation",
+  "environment": "production",
+  "target": "arbor-prod (GCE asia-southeast1-b)",
+  "domain": "arbor.terrene.foundation",
+  "backend_image": "terrenefoundation/arbor-backend:0.4.0",
+  "frontend_image": "terrenefoundation/arbor-frontend:0.4.0",
+  "health_verified_external": true,
+  "health_endpoint": "https://arbor.terrene.foundation/api/health",
+  "notes": "Ollama BYOK provider end-to-end. C1 audit clean (0 BYOK configs historically, no rotation required). M4 kaizen-agents patch applied in-repo until kailash-py#361 ships upstream."
+}
