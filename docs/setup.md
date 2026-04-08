@@ -14,12 +14,22 @@ Set `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in `.env`.
 
 **Two models are required** for a fully functional Ollama deployment:
 
-1. **Chat model** — must support tool calls. Allowed families:
-   - `llama3.1`, `llama3.2`, `qwen2.5`, `mistral-nemo`
-   - `firefunction-v2`, `command-r`, `command-r-plus`
+1. **Chat model** — must support tool calls. Tool-capable families:
+   - `qwen3`, `qwen2.5`, `qwq` (Qwen reasoning)
+   - `llama3.1`, `llama3.2`
+   - `mistral-nemo`, `firefunction-v2`
+   - `command-r`, `command-r-plus`
+
+   **Recommended:** `qwen3:latest` — 5.2 GB, fast, clean output, strong tool-call
+   behavior with aggressive KB search. Verified against Arbor's advisory engine
+   with real Singapore HR content.
 
    ```bash
-   ollama pull llama3.1:8b     # ~4.7 GB
+   ollama pull qwen3:latest     # ~5.2 GB (recommended)
+   # or
+   ollama pull qwq:32b          # ~19 GB (reasoning, slower, emits <think> blocks)
+   # or
+   ollama pull llama3.1:8b      # ~4.7 GB (canonical small option)
    ```
 
 2. **Embedding model** — for knowledge base semantic search:
@@ -28,19 +38,31 @@ Set `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in `.env`.
    ollama pull mxbai-embed-large   # ~670 MB
    ```
 
-**Minimum disk**: ~5.5 GB for both models.
+**Minimum disk**: ~6 GB (qwen3 + mxbai-embed-large). Plan for more if you pick qwq.
 
 **Environment variables**:
 
 ```bash
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:8b
+OLLAMA_MODEL=qwen3:latest
 EMBEDDING_MODEL_OLLAMA=mxbai-embed-large   # default, can be overridden
 ```
 
 ### Both Providers
 
 You can configure both providers simultaneously. BYOK users can choose their provider in the UI. The server uses `OPENAI_API_KEY` as the default for non-BYOK companies.
+
+## Performance comparison (reference)
+
+Measured with `scripts/compare_qwen_vs_openai.py` on 6 representative HR queries:
+
+| Provider | Model               | Median latency | Tool calls       | Output quality                                   |
+| -------- | ------------------- | -------------- | ---------------- | ------------------------------------------------ |
+| OpenAI   | `gpt-5-chat-latest` | ~5 s           | Selective (2/6)  | Precise, age-banded CPF rates                    |
+| Ollama   | `qwen3:latest`      | ~16 s          | Aggressive (5/6) | Clean, compliant, sometimes generic on specifics |
+| Ollama   | `qwq:32b`           | ~60-90 s       | Aggressive       | Chain-of-thought visible, messier                |
+
+qwen3 is the right default for self-hosted / air-gap deployments. OpenAI remains faster and slightly more precise on numeric specifics. All three correctly enforce the Refusal Policy (circumvention refusal + prompt-injection refusal verified end-to-end).
 
 ## Troubleshooting
 
