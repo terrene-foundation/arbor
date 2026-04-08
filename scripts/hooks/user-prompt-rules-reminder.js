@@ -24,6 +24,9 @@ const {
   buildWorkspaceSummary,
   findAllSessionNotes,
 } = require("./lib/workspace-utils");
+const {
+  logObservation: logLearningObservation,
+} = require("./lib/learning-utils");
 
 const TIMEOUT_MS = 3000;
 const timeout = setTimeout(() => {
@@ -49,7 +52,6 @@ process.stdin.on("end", () => {
 
 function buildReminder(data) {
   const cwd = data.cwd || process.cwd();
-  const userMessage = (data.tool_input?.user_message || "").toLowerCase();
 
   // ── Always inject env summary (brief, 1-2 lines) ─────────────────
   const envPath = path.join(cwd, ".env");
@@ -79,19 +81,10 @@ function buildReminder(data) {
     );
   }
 
-  // Line 3: Zero-tolerance behavioral rules (always present, survives compression)
-  lines.push(
-    "[ZERO-TOLERANCE] " +
-      "Pre-existing failures MUST be FIXED, not reported. " +
-      "Stubs/TODOs/placeholders are BLOCKED — implement fully or remove. " +
-      "No naive fallbacks hiding errors. " +
-      "No workarounds for SDK bugs — deep dive, reproduce, file GitHub issue. " +
-      "Never hardcode models/keys. " +
-      "Create missing records (god-mode). " +
-      "Implement gaps, don't document them.",
-  );
+  // (Zero-tolerance rules are loaded as an always-on rule file; no need to
+  // duplicate here — doing so costs tokens on every user message.)
 
-  // Line 4: Workspace context (survives compaction — primary anti-amnesia mechanism)
+  // Line 3: Workspace context (survives compaction — primary anti-amnesia mechanism)
   try {
     const wsSummary = buildWorkspaceSummary(cwd);
     if (wsSummary) {
@@ -121,48 +114,13 @@ function buildReminder(data) {
     }
   } catch {}
 
-  // ── Contextual reminders based on user message content ────────────
-  const llmKeywords = [
-    "model",
-    "llm",
-    "agent",
-    "gpt",
-    "claude",
-    "gemini",
-    "openai",
-    "anthropic",
-    "api key",
-    "shadow agent",
-    "objective",
-  ];
-  const e2eKeywords = [
-    "e2e",
-    "test",
-    "playwright",
-    "validate",
-    "red-team",
-    "persona",
-    "rbac",
-    "login",
-  ];
+  // (Keyword-triggered reminders removed — the corresponding rule files
+  // are always-on and already cover env-models and e2e god-mode.)
 
-  const mentionsLLM = llmKeywords.some((kw) => userMessage.includes(kw));
-  const mentionsE2E = e2eKeywords.some((kw) => userMessage.includes(kw));
-
-  if (mentionsLLM) {
-    lines.push(
-      "[REMINDER] Read model name from .env (OPENAI_PROD_MODEL or equivalent). " +
-        "Read API key from .env. NEVER hardcode.",
-    );
-  }
-
-  if (mentionsE2E) {
-    lines.push(
-      "[REMINDER] God-mode E2E: Create ALL missing records. " +
-        "Adapt to data changes. Assume correct role. " +
-        "If endpoint missing, implement it.",
-    );
-  }
+  // --- User correction detection for learning system ---
+  try {
+    logUserCorrection(data.tool_input?.user_message, cwd, data.session_id);
+  } catch {}
 
   return {
     continue: true,
@@ -172,4 +130,40 @@ function buildReminder(data) {
       message: lines.join("\n"),
     },
   };
+}
+
+/**
+ * Detect user corrections and log as learning observations.
+ * A correction is when the user pushes back on an approach or redirects.
+ * Pure string matching — no LLM. /codify does semantic analysis later.
+ */
+function logUserCorrection(rawMessage, cwd, sessionId) {
+  if (!rawMessage || rawMessage.length < 10) return;
+
+  // Patterns that indicate the user is correcting the agent's approach.
+  // We check sentence-start positions to avoid false positives like "no problem".
+  const correctionPatterns = [
+    /^no[,.]?\s/im, // "No, use X instead"
+    /^don'?t\s/im, // "Don't do that"
+    /^stop\s/im, // "Stop doing X"
+    /^wrong/im, // "Wrong approach"
+    /^that'?s\s+(not|wrong|incorrect)/im, // "That's not right"
+    /\binstead\s+use\b/i, // "instead use X"
+    /\bnot\s+like\s+that\b/i, // "not like that"
+    /\bwhy\s+did\s+you\b/i, // "why did you do X"
+    /\byou\s+should(n'?t|\s+not)\b/i, // "you shouldn't" / "you should not"
+    /\bthat'?s\s+completely\b/i, // "that's completely wrong"
+    /\bi\s+don'?t\s+understand\b/i, // "I don't understand" (signals confusion with output)
+  ];
+
+  const matched = correctionPatterns.some((p) => p.test(rawMessage));
+  if (!matched) return;
+
+  // Log the correction — /codify will analyze semantically
+  logLearningObservation(
+    cwd,
+    "user_correction",
+    { message: rawMessage.substring(0, 500) },
+    { session_id: sessionId || "unknown" },
+  );
 }
