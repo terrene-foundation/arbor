@@ -1,40 +1,82 @@
-commit: uncommitted (M60 session — 2026-03-31)
-timestamp: 2026-03-31T18:30:00+08:00
+commit: 32e91ebaee6064ec515867914b78759895032067 (uncommitted changes on top)
+branch: feat/ollama-provider-e2e-q1q4q5q7
+timestamp: 2026-04-09T06:30:00+08:00
+phase: /redteam round 16 complete
 
 ## Unit Tests (Tier 1)
-passed: 1155
+passed: 1169
 failed: 0
 regressions: 0
-new_tests: 5 (test_registration_company.py)
-command: pytest tests/unit/ -q --timeout=30 -p no:warnings
+new_tests: ~62 (T110-T129 ollama provider + 4 new M4 regression tests)
+command: pytest tests/unit/ tests/regression/ -x --tb=short -q
+
+## Regression Tests
+count: 8
+files:
+  - tests/regression/test_regression_C1_env_leak.py (multi-tenant env poisoning)
+  - tests/regression/test_regression_C4_model_required.py (Ollama model required at save)
+  - tests/regression/test_regression_M1_ollama_zero_cost.py (Ollama billed at $0)
+  - tests/regression/test_regression_V1V2V3_no_keyword_routing.py (regex guardrails removed)
+  - tests/regression/test_regression_M4_kaizen_ollama_tool_args.py (NEW — kaizen-agents tool-call bug)
+status: all passing
+
+## Live Integration Tests (Tier 2 — REAL Ollama, no mocking)
+ollama_endpoint: http://localhost:11434
+models_pulled:
+  - mxbai-embed-large (669 MB) — embeddings
+  - qwq:32b (19 GB) — Qwen reasoning model with tool use
+  - qwen2.5:7b (4.7 GB) — Qwen instruct model (faster, used for regression coverage)
+models_removed:
+  - bakllava:latest (vision, not tool-capable)
+  - nomic-embed-text:latest (768-dim, wrong dimension)
+  - qwen2.5:32b-instruct-q8_0 (replaced with qwq:32b for reasoning)
+
+tests_passed: 20 / 20 (after M4 patch)
+key_results:
+  - Embedding pipeline: real mxbai-embed-large returns 1024-dim vectors
+  - C1 multi-tenant env leak: snapshot equality verified (no env mutation by BYOK request)
+  - Adapter injection: build_adapter_from_context returns real OllamaStreamAdapter
+  - Validate endpoint: real model present → valid=True; missing → valid=False with helpful list
+  - System prompt: 5 refusal clauses present, ordered correctly (Refusal Policy idx 762, Tools idx 5827)
+  - End-to-end advisory query (qwen2.5:7b): tools_called=['search_kb'], real EA Section 36 content, 28.3s
+  - End-to-end advisory query (qwq:32b): tools_called=['search_kb'], qwq reasoning over real KB results, 86.7s
+  - V1 paraphrased circumvention regression: refused via Refusal Policy clauses 1+4, 3.8s
+  - V2 prompt injection regression: refused with verbatim clause 2 template, no leak, 0.5s
 
 ## E2E Tests (Tier 3)
-passed: 42
-skipped: 2 (requires_postgres — live_api_all_flows, onboarding_flow)
-failed: 0
-new_tests: 8 (test_registration_flow.py)
-command: pytest tests/e2e/ -q --timeout=30 -p no:warnings
+status: deferred
+reason: Requires Playwright + full stack with Ollama; T127 specs ready in todo
 
-## Integration Tests (Tier 2)
-passed: 697
-skipped: 335 (requires_postgres)
-failed: 0
-command: pytest tests/integration/ -q --timeout=30 -p no:warnings
+## CRITICAL — Live discovery + fix
+M4: kaizen-agents OllamaStreamAdapter sends stringified tool-call args on multi-turn requests
+  - Bug fires on second turn of tool-using conversations
+  - Verified at API level: string args → 400, object args → 200
+  - Fix applied: src/hr_advisory/delegate/_kaizen_patches.py runtime monkey-patch
+  - Upstream issue: https://github.com/terrene-foundation/kailash-py/issues/361
+  - Regression test: 4 tests in test_regression_M4_kaizen_ollama_tool_args.py
+  - Patch is reversible: delete _kaizen_patches.py + import in arbor_loop.py once kaizen-py releases fix
 
-## Docker Build
-status: PASS
-image: arbor-backend:test
+## Security Review (T129)
+status: APPROVED WITH CONDITIONS
+critical_findings: 1 (C1-REGRESSION in shadow.py)
+critical_resolved: 1 (per round 15)
+high_findings: 5 (deferred to follow-up PR)
+report: workspaces/hr-ai-advisory/04-validate/round-15-t129-security-review.md
 
-## CI Note
-Run unit and e2e as SEPARATE pytest invocations (not combined).
-Module-level Settings caching causes cross-contamination in a single process.
-  pytest tests/unit/ && pytest tests/e2e/ && pytest tests/integration/
+## Round 16 — Live Ollama red team
+report: workspaces/hr-ai-advisory/04-validate/round-16-live-ollama-redteam.md
+journal: workspaces/hr-ai-advisory/journal/0016-DISCOVERY-kaizen-m4-bug-confirmed-live.md
+verdict: CONVERGED — ready for merge after audit log query
 
-## Security Red Team (Round 2)
-C1_FIXED: Tenant isolation bypass via company_id in public registration — removed
-C2_FIXED: Missing NaN guard on leave calculator — added math.isfinite()
-nan_guards: 6 calculators (cpf, cost_to_company, retrenchment, overtime, notice_period, leave)
-cors_star: test fixtures only
-tenant_isolation: verified
-guardrails: 4 layers wired
-company_name_length: capped at 255 chars
+## Implementation Summary
+todos_completed: 20 / 20
+phase_1_legacy_cleanup: T110-T112 (~2,700 LOC removed)
+phase_2_3_adapter_seam: T113-T114 (C1 fix, per-request adapter injection)
+phase_4_5_save_validate: T115-T116 (allowlist, validate model pulled)
+phase_6_billing_invariant: T117 (provider-aware cost, init-time invariant)
+phase_7_embeddings: T118-T120 (vector dim 1536->1024, provider-aware embedder, docs)
+phase_7_5_autonomy: T121-T122 (regex guardrails deleted, refusal policy added)
+phase_8_frontend: T123 (Ollama settings UI updates)
+phase_9_upstream: T124 (kailash-py#361 filed during round 16)
+phase_10_tests: T125-T128 (unit + regression complete; integration verified live)
+phase_11_security: T129 (CRITICAL fixed in round 15; round 16 found+fixed M4)
