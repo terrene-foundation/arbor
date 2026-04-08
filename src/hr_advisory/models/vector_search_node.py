@@ -24,7 +24,7 @@ class ProvisionSimilaritySearchNode(AsyncNode):
                 name="query_vector",
                 type=list,
                 required=True,
-                description="Query embedding vector (1536-dim)",
+                description="Query embedding vector (1024-dim)",
             ),
             "k": NodeParameter(
                 name="k",

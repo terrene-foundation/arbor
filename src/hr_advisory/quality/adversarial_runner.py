@@ -377,13 +377,11 @@ class AdversarialRunner:
 
         start = time.time()
         try:
-            from hr_advisory.agents.advisory_engine import AdvisoryEngine
+            from hr_advisory.delegate.arbor_loop import run_delegate_sync
 
-            engine = AdvisoryEngine()
-            response = engine.run(
-                query=query,
-                conversation_history=[],
-            )
+            # run_delegate_sync returns {response_text, risk_tier, confidence,
+            # domains, citations, tools_called, usage, degraded}
+            response = run_delegate_sync(prompt=query)
 
             if response is None:
                 return ScenarioResult(

@@ -14,13 +14,49 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from kaizen import Agent as BaseAgent  # kaizen 2.3.1+ canonical import
+from kaizen import Agent as BaseAgent, InputField, OutputField, Signature  # kaizen 2.3.1+
 
 from hr_advisory.agents.config import DocumentGenerationConfig
-from hr_advisory.agents.specialists._base import _KaizenCompatMixin
-from hr_advisory.agents.specialists.signatures import DocumentGenerationSignature
+from hr_advisory.agents._kaizen_compat import _KaizenCompatMixin
 
 logger = logging.getLogger(__name__)
+
+
+class DocumentGenerationSignature(Signature):
+    """Document generation agent.
+
+    Given a template identifier, company context, and specific parameters,
+    produce a complete HR document (contract, policy, form, letter).
+    """
+
+    __intent__ = "Generate HR documents from templates"
+    __guidelines__ = [
+        "Use the template structure faithfully",
+        "Fill all placeholders with company-specific values",
+        "Flag any missing required parameters as warnings",
+        "Include statutory minimum clauses where applicable",
+    ]
+
+    # Inputs
+    template_id: str = InputField(
+        description="Identifier of the document template to use",
+    )
+    company_context: str = InputField(
+        description="JSON string of company profile for document personalisation",
+        default="{}",
+    )
+    specific_params: str = InputField(
+        description="JSON object of template-specific parameters (e.g. employee name, salary)",
+        default="{}",
+    )
+
+    # Outputs
+    generated_content: str = OutputField(
+        description="The fully generated document content",
+    )
+    warnings: str = OutputField(
+        description="JSON list of warnings about missing data or compliance notes",
+    )
 
 
 class DocumentGenerationAgent(_KaizenCompatMixin, BaseAgent):

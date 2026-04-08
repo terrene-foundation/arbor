@@ -31,6 +31,7 @@ from hr_advisory.services.llm_config import (
     delete_llm_config,
     get_active_llm_config,
     save_llm_config,
+    validate_ollama_model,
 )
 from hr_advisory.services.llm_budget import get_usage_summary
 
@@ -183,6 +184,24 @@ async def save_company_llm_config(
             status_code=400,
             detail=f"model_pref exceeds maximum length of {_MAX_MODEL_LENGTH} characters.",
         )
+
+    # Ollama / custom: model_pref is required; Ollama also checks tool-capability
+    if provider == "ollama":
+        if not model_pref:
+            raise HTTPException(
+                status_code=400,
+                detail="model_pref is required for Ollama provider.",
+            )
+        try:
+            validate_ollama_model(model_pref)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif provider == "custom":
+        if not model_pref:
+            raise HTTPException(
+                status_code=400,
+                detail="model_pref is required for custom provider.",
+            )
 
     # Encrypt the key if provided
     encrypted_key = None
@@ -389,13 +408,32 @@ async def validate_company_llm_config(
 
     # Validate based on provider type
     if provider == "ollama":
-        return await _validate_ollama(base_url)
+        return await _validate_ollama(base_url, model_pref)
     else:
         return await _validate_cloud_provider(provider, api_key, base_url, model_pref)
 
 
-async def _validate_ollama(base_url: str) -> dict:
-    """Validate Ollama endpoint by hitting /api/tags."""
+def _model_in_tags(requested: str, available_tags: list[str]) -> bool:
+    """Match a requested model against the Ollama server's pulled models.
+
+    Algorithm:
+    1. Exact-match: requested == tag
+    2. Family-prefix match: requested.split(":")[0] == tag.split(":")[0]
+    3. Never substring-anywhere
+    """
+    if not requested or not available_tags:
+        return False
+    if requested in available_tags:
+        return True
+    requested_family = requested.split(":")[0].lower()
+    for tag in available_tags:
+        if tag.split(":")[0].lower() == requested_family:
+            return True
+    return False
+
+
+async def _validate_ollama(base_url: str, model_pref: str = "") -> dict:
+    """Validate Ollama endpoint by hitting /api/tags and checking for model."""
     if not base_url:
         return {"valid": False, "message": "base_url is required for Ollama."}
 
@@ -408,11 +446,26 @@ async def _validate_ollama(base_url: str) -> dict:
             if resp.status_code == 200:
                 data = resp.json()
                 models = data.get("models", [])
-                model_names = [m.get("name", "") for m in models[:10]]
+                all_model_names = [m.get("name", "") for m in models]
+                display_models = all_model_names[:5]
+
+                # If model_pref provided, verify it's pulled on the server
+                if model_pref and not _model_in_tags(model_pref, all_model_names):
+                    avail_str = ", ".join(display_models) if display_models else "none"
+                    return {
+                        "valid": False,
+                        "message": (
+                            f"'{model_pref}' is not pulled on this Ollama server. "
+                            f"Available models: {avail_str}. "
+                            f"Run `ollama pull {model_pref}` first."
+                        ),
+                        "available_models": display_models,
+                    }
+
                 return {
                     "valid": True,
                     "message": f"Ollama endpoint is reachable. {len(models)} model(s) available.",
-                    "available_models": model_names,
+                    "available_models": display_models,
                 }
             else:
                 return {
@@ -422,18 +475,21 @@ async def _validate_ollama(base_url: str) -> dict:
     except httpx.ConnectError:
         return {
             "valid": False,
-            "message": "Cannot connect to Ollama endpoint. Is Ollama running?",
+            "message": "Could not reach Ollama endpoint. Is Ollama running?",
         }
     except httpx.TimeoutException:
         return {
             "valid": False,
-            "message": "Ollama endpoint timed out. Check the URL and network.",
+            "message": "Ollama endpoint timed out. Check the server and network.",
         }
     except Exception as exc:
-        logger.warning("Ollama validation failed: %s", exc)
+        logger.warning(
+            "Ollama validation failed: %s",
+            exc.__class__.__name__,
+        )
         return {
             "valid": False,
-            "message": "Failed to validate Ollama endpoint. Check the URL.",
+            "message": "Could not reach Ollama endpoint. Check the server address.",
         }
 
 
@@ -764,6 +820,27 @@ async def save_user_personal_config(
     _validate_provider(provider)
     if api_key and len(api_key) > _MAX_KEY_LENGTH:
         raise HTTPException(status_code=400, detail="API key is too long.")
+
+    # Validate base_url (M5: pre-existing SSRF gap — was missing here)
+    _validate_base_url(base_url, provider)
+
+    # Ollama / custom: model_pref is required; Ollama also checks tool-capability
+    if provider == "ollama":
+        if not model_pref:
+            raise HTTPException(
+                status_code=400,
+                detail="model_pref is required for Ollama provider.",
+            )
+        try:
+            validate_ollama_model(model_pref)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif provider == "custom":
+        if not model_pref:
+            raise HTTPException(
+                status_code=400,
+                detail="model_pref is required for custom provider.",
+            )
 
     encrypted_key = encrypt_api_key(api_key) if api_key else None
 

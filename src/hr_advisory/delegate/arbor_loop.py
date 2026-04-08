@@ -18,7 +18,12 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
 from kaizen_agents.delegate import Delegate, DelegateEvent, TextDelta, ErrorEvent
+from kaizen_agents.delegate.adapters import StreamingChatAdapter
 from kaizen_agents.delegate.loop import ToolRegistry
+
+# Apply kaizen-agents runtime patches BEFORE any Delegate is constructed.
+# Currently fixes M4: OllamaStreamAdapter tool-call args serialization.
+import hr_advisory.delegate._kaizen_patches  # noqa: F401
 
 from hr_advisory.delegate.system_prompt import build_system_prompt
 from hr_advisory.delegate.tools import register_arbor_tools
@@ -35,7 +40,15 @@ __all__ = [
 
 @dataclass
 class DelegateConfig:
-    """Configuration for the Arbor Delegate."""
+    """Configuration for the Arbor Delegate.
+
+    When ``adapter`` is provided, the Delegate uses it directly (BYOK path).
+    When ``adapter`` is None AND ``require_server_default`` is True, the
+    request-context caller forgot to build an adapter — raise rather than
+    falling through to env vars (C1 multi-tenant leak prevention).
+    When ``adapter`` is None AND ``require_server_default`` is False, fall
+    back to env-var resolution (legacy/script path).
+    """
 
     model: str = ""
     api_key: str = field(default="", repr=False)
@@ -46,10 +59,15 @@ class DelegateConfig:
     jwt_token: str | None = None
     company_context: dict[str, Any] | None = None
     user_context: dict[str, Any] | None = None
+    adapter: StreamingChatAdapter | None = None
+    require_server_default: bool = False
 
 
-def _resolve_llm_settings(config: DelegateConfig) -> tuple[str, str, str | None]:
+def _resolve_llm_settings_from_env(config: DelegateConfig) -> tuple[str, str, str | None]:
     """Resolve model, api_key, base_url from config + env vars.
+
+    Used when ``DelegateConfig.adapter is None`` (legacy/script path).
+    BYOK contexts MUST pass an explicit adapter via DelegateConfig.adapter.
 
     Priority: config > LLM_* (generic) > OPENAI_* (provider-specific) > defaults.
     """
@@ -79,23 +97,14 @@ def create_delegate(config: DelegateConfig | None = None) -> Delegate:
     """Create an Arbor Delegate agent.
 
     Returns a Delegate instance ready for streaming via delegate.run(prompt).
+
+    When ``config.adapter`` is provided, the adapter is passed directly to
+    the Delegate — no env-var resolution occurs. When ``config.adapter`` is
+    None and ``config.require_server_default`` is True, raises RuntimeError
+    to prevent silent env-var fallback in request contexts (C1 fix).
     """
     if config is None:
         config = DelegateConfig()
-
-    model, api_key, base_url = _resolve_llm_settings(config)
-
-    logger.info(
-        "Delegate LLM: model=%s, base_url=%s",
-        model,
-        base_url or "(default: OpenAI)",
-    )
-
-    # Set provider env BEFORE creating the Delegate (adapter reads these)
-    if base_url:
-        os.environ.setdefault("OPENAI_BASE_URL", base_url)
-    if api_key and api_key != "not-needed":
-        os.environ.setdefault("OPENAI_API_KEY", api_key)
 
     # Build tool registry with all Arbor tools
     registry = ToolRegistry()
@@ -111,14 +120,43 @@ def create_delegate(config: DelegateConfig | None = None) -> Delegate:
         user_context=config.user_context,
     )
 
-    # Create the Delegate
-    delegate = Delegate(
-        model=model,
-        tools=registry,
-        system_prompt=system_prompt,
-        max_turns=config.max_turns,
-        budget_usd=config.budget_usd,
-    )
+    if config.adapter is not None:
+        # Per-request adapter injection (BYOK path) — no env mutation
+        model = config.adapter._default_model
+        logger.info(
+            "Delegate LLM: adapter=%s, model=%s",
+            type(config.adapter).__name__,
+            model,
+        )
+        delegate = Delegate(
+            model=model,
+            tools=registry,
+            system_prompt=system_prompt,
+            max_turns=config.max_turns,
+            budget_usd=config.budget_usd,
+            adapter=config.adapter,
+        )
+    elif config.require_server_default:
+        raise RuntimeError(
+            "DelegateConfig.adapter is required in request context — env "
+            "fallback is disabled to prevent multi-tenant key leakage. "
+            "Build an adapter via build_adapter_from_context() first."
+        )
+    else:
+        # Legacy/script/test path — resolve from env vars
+        model, api_key, base_url = _resolve_llm_settings_from_env(config)
+        logger.info(
+            "Delegate LLM: adapter=env-fallback, model=%s, base_url=%s",
+            model,
+            base_url or "(default: OpenAI)",
+        )
+        delegate = Delegate(
+            model=model,
+            tools=registry,
+            system_prompt=system_prompt,
+            max_turns=config.max_turns,
+            budget_usd=config.budget_usd,
+        )
 
     # Configure the hydrator's always-active tools so the LLM sees them
     # without needing to call search_tools first.

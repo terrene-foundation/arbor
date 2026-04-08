@@ -6,8 +6,7 @@ a TAOD loop where the LLM decides what tools to call via 208+ registered tools.
 Action agents (CalculatorAgent, DocumentGenerationAgent) are still used as
 tool backends by the Delegate.
 
-Memory classes (HRSharedMemoryPool, ShortTermMemory, LongTermMemory) are
-used by the advisory router for conversation context.
+ShortTermMemory is used by the advisory router for conversation context.
 """
 
 from hr_advisory.agents.actions import (
@@ -15,8 +14,6 @@ from hr_advisory.agents.actions import (
     DocumentGenerationAgent,
 )
 from hr_advisory.agents.memory import (
-    HRSharedMemoryPool,
-    LongTermMemory,
     ShortTermMemory,
 )
 
@@ -25,7 +22,5 @@ __all__ = [
     "DocumentGenerationAgent",
     "CalculatorAgent",
     # Memory
-    "HRSharedMemoryPool",
     "ShortTermMemory",
-    "LongTermMemory",
 ]

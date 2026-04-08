@@ -8,7 +8,9 @@ import os
 
 from dataflow.adapters import PostgreSQLVectorAdapter
 
-VECTOR_DIMENSIONS = 1536  # OpenAI text-embedding-3-small
+VECTOR_DIMENSIONS = (
+    1024  # mxbai-embed-large (Ollama) / text-embedding-3-large with dimensions=1024 (OpenAI)
+)
 
 
 def get_vector_adapter() -> PostgreSQLVectorAdapter:

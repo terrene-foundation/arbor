@@ -77,6 +77,17 @@ def _cleanup_runtimes_after_module():
     gc.collect()
 
 
+@pytest.fixture
+def ollama_only_env(monkeypatch):
+    """Force tests to use Ollama by removing OpenAI env vars.
+
+    Prevents tests from silently falling through to OpenAI
+    thanks to conftest.py .env auto-load (red team H8).
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+
 @pytest.fixture(scope="session")
 def shared_runtime():
     """Provide a single LocalRuntime shared across the test session.

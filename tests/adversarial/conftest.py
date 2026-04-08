@@ -35,9 +35,9 @@ def automated_checks():
 
 
 def run_advisory_query(query: str, company_context: dict | None = None) -> dict | None:
-    """Send a query through the advisory engine and return the response.
+    """Send a query through the Delegate and return the response.
 
-    This calls the AdvisoryEngine directly (integration test).
+    This calls run_delegate_sync directly (integration test).
     Uses the LLM configured in .env.
 
     Returns:
@@ -51,17 +51,16 @@ def run_advisory_query(query: str, company_context: dict | None = None) -> dict 
         pytest.skip("No LLM available for adversarial testing")
 
     try:
-        from hr_advisory.agents.advisory_engine import AdvisoryEngine
+        from hr_advisory.delegate.arbor_loop import run_delegate_sync
 
-        engine = AdvisoryEngine()
-        result = engine.run(
-            query=query,
-            conversation_history=[],
-            company_context=company_context,
-        )
+        # run_delegate_sync returns the same {response_text, risk_tier,
+        # confidence, citations, tools_called, usage, ...} shape as the
+        # old AdvisoryEngine.run(), so downstream adversarial tests work
+        # unchanged.
+        result = run_delegate_sync(prompt=query)
         return result
     except Exception as exc:
-        pytest.skip(f"Advisory engine failed: {exc}")
+        pytest.skip(f"Delegate failed: {exc}")
         return None
 
 

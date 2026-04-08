@@ -590,13 +590,9 @@ async def shadow_execute(
     Returns a structured response with Arbor identity.
     """
     from hr_advisory.delegate.arbor_loop import DelegateConfig, create_delegate
+    from hr_advisory.services.llm_config import build_adapter_from_context, build_llm_context
     from kaizen_agents.delegate import TextDelta, ToolCallStart, ToolCallEnd, ErrorEvent
     from hr_advisory.shadow.formatter import ArborFormatter
-    from hr_advisory.workflows.guardrails import (
-        ScreeningResult,
-        screen_injection,
-        screen_scope,
-    )
 
     body = await request.json()
     message = body.get("message", "").strip()
@@ -654,32 +650,32 @@ async def shadow_execute(
     if page_context not in _KNOWN_PAGES:
         page_context = "dashboard"
 
-    # ── Step 1: Guardrails — scope check and injection detection ──
-    scope_result = screen_scope(message)
-    if scope_result.result == ScreeningResult.BLOCK:
-        formatter = ArborFormatter()
-        return {
-            "type": "out_of_scope",
-            "message": formatter.format_error(scope_result.reason),
-            "alternative_guidance": scope_result.alternative_guidance,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    injection_result = screen_injection(message, user_id=user_id)
-    if injection_result.result == ScreeningResult.BLOCK:
-        formatter = ArborFormatter()
-        return {
-            "type": "blocked",
-            "message": formatter.format_error(injection_result.reason),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    # ── Step 2: Run the Delegate ──────────────────────────────────
+    # ── Step 1: Run the Delegate ───────────────────────────────────
     # The LLM reasons about intent, picks tools, executes, and responds.
     # We inject page context into the prompt so the LLM is aware of where
     # the user is in the app.
 
     company_id = current_user.get("company_id")
+    user_id = current_user.get("user_id")
+
+    # C1 fix: per-request adapter injection (no env-var fallback in request context).
+    # Mirrors the pattern in advisory.py — build the adapter from the resolved
+    # LLMKeyContext, then pass it through DelegateConfig with require_server_default=True
+    # so any code path that bypasses the adapter raises rather than leaking BYOK keys.
+    if not company_id:
+        # Tenant isolation: shadow agent requires a company-scoped JWT.
+        # Without company_id we cannot resolve a BYOK context, so refuse the request
+        # rather than fall back to server-default env (which would defeat C1).
+        raise HTTPException(
+            status_code=403,
+            detail="Shadow agent requires a company-scoped session.",
+        )
+    llm_context = build_llm_context(
+        company_id=int(company_id),
+        user_id=int(user_id) if user_id else None,
+    )
+    adapter = build_adapter_from_context(llm_context)
+
     delegate_config = DelegateConfig(
         jwt_token=jwt_token,
         company_id=int(company_id) if company_id else None,
@@ -687,6 +683,8 @@ async def shadow_execute(
             "role": current_user.get("role", ""),
             "name": current_user.get("name", ""),
         },
+        adapter=adapter,
+        require_server_default=True,
     )
 
     delegate = create_delegate(delegate_config)

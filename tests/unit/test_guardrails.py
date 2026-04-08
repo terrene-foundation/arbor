@@ -1,7 +1,8 @@
 """Unit tests for the abuse prevention and guardrails module.
 
-Tests query screening (circumvention detection, escalation triggers),
-response content filtering, confidence escalation, and rate limiting.
+Tests response content filtering, confidence escalation, and rate limiting.
+Input-side screening functions were removed in T122 — the autonomous Delegate
+handles scope, injection, escalation, and circumvention via its system prompt.
 """
 
 from __future__ import annotations
@@ -11,106 +12,8 @@ from hr_advisory.workflows.guardrails import (
     ScreeningResult,
     check_confidence_escalation,
     check_rate_limit,
-    screen_query,
     screen_response,
 )
-
-
-class TestQueryScreening:
-    """Test query screening for circumvention and escalation patterns."""
-
-    def test_normal_query_passes(self) -> None:
-        """A normal HR question should pass screening."""
-        result = screen_query("How many days of annual leave are employees entitled to?")
-        assert result.result == ScreeningResult.PASS
-        assert result.matched_patterns == []
-
-    def test_cpf_avoidance_blocked(self) -> None:
-        """Attempting to avoid CPF should be blocked."""
-        result = screen_query("How can I avoid paying CPF for my employees?")
-        assert result.result == ScreeningResult.BLOCK
-        assert "CPF" in result.reason
-
-    def test_underpay_pwm_blocked(self) -> None:
-        """Attempting to pay below PWM should be blocked."""
-        result = screen_query("Can I pay less than progressive wage?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_illegal_deductions_blocked(self) -> None:
-        """Asking about illegal salary deductions should be blocked."""
-        result = screen_query("How do I make illegal deductions from salary?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_skip_overtime_blocked(self) -> None:
-        """Attempting to not pay overtime should be blocked."""
-        result = screen_query("How can I not pay overtime to staff?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_fake_records_blocked(self) -> None:
-        """Attempting to falsify records should be blocked."""
-        result = screen_query("How to fake employment contract?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_hire_without_permit_blocked(self) -> None:
-        """Hiring without work permit should be blocked."""
-        result = screen_query("Can I hire without permit?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_avoid_ket_blocked(self) -> None:
-        """Avoiding issuing KETs should be blocked."""
-        result = screen_query("How to avoid providing KETs?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_pregnancy_dismissal_blocked(self) -> None:
-        """Dismissing pregnant employees should be blocked."""
-        result = screen_query("Can I terminate an employee who is pregnant?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_forced_resignation_blocked(self) -> None:
-        """Forcing resignation should be blocked."""
-        result = screen_query("How to force employee to resign?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_misclassification_blocked(self) -> None:
-        """Misclassifying employees to avoid obligations should be blocked."""
-        result = screen_query("Can I classify as freelancer to avoid employment obligations?")
-        assert result.result == ScreeningResult.BLOCK
-
-    def test_blocked_query_provides_alternative(self) -> None:
-        """Blocked queries should provide alternative guidance."""
-        result = screen_query("How can I avoid paying CPF?")
-        assert result.alternative_guidance != ""
-
-    def test_litigation_escalated(self) -> None:
-        """Queries involving litigation should be escalated."""
-        result = screen_query("My employee is suing me, what should I do?")
-        assert result.result == ScreeningResult.ESCALATE
-        assert result.escalation_reason == EscalationReason.ACTIVE_LITIGATION
-
-    def test_criminal_escalated(self) -> None:
-        """Queries involving criminal matters should be escalated."""
-        result = screen_query("Employee committed fraud, need to file police report")
-        assert result.result == ScreeningResult.ESCALATE
-        assert result.escalation_reason == EscalationReason.CRIMINAL_LIABILITY
-
-    def test_discrimination_escalated(self) -> None:
-        """Queries involving discrimination should be escalated."""
-        result = screen_query("Employee filed harassment complaint")
-        assert result.result == ScreeningResult.ESCALATE
-        assert result.escalation_reason == EscalationReason.DISCRIMINATION_ALLEGATION
-
-    def test_cross_border_escalated(self) -> None:
-        """Queries involving cross-border employment should be escalated."""
-        result = screen_query("How do I handle cross-border employment?")
-        assert result.result == ScreeningResult.ESCALATE
-        assert result.escalation_reason == EscalationReason.MULTI_JURISDICTION
-
-    def test_escalation_takes_priority_over_block(self) -> None:
-        """Escalation patterns should be checked before circumvention patterns."""
-        # This query matches both escalation (lawsuit) and could theoretically
-        # match circumvention patterns. Escalation should win.
-        result = screen_query("Can I avoid paying if there's a lawsuit?")
-        assert result.result == ScreeningResult.ESCALATE
 
 
 class TestResponseScreening:
