@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "SpecialistConfig",
     "DocumentGenerationConfig",
     "has_llm_available",
     "resolve_provider_and_model",
@@ -241,24 +240,6 @@ def has_llm_available(
 # ---------------------------------------------------------------------------
 # Agent config dataclasses
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class SpecialistConfig:
-    """Config shared by all domain specialist agents."""
-
-    llm_provider: str = ""
-    model: str = ""
-    temperature: float = 0.1
-    max_tokens: int = 2048
-
-    def __post_init__(self):
-        if not self.model or not self.llm_provider:
-            p, m = resolve_provider_and_model()
-            if not self.llm_provider:
-                self.llm_provider = p
-            if not self.model:
-                self.model = m
 
 
 @dataclass

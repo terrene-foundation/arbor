@@ -4,9 +4,7 @@
 """Arbor Delegate — autonomous HR assistant powered by kaizen-agents.
 
 The Delegate is the Layer 3 entrypoint for Arbor, built on the
-kaizen-agents AgentLoop (Layer 2 engine). It replaces the manual
-advisory_engine.py ReAct loop with the SDK's native autonomous
-tool-calling loop.
+kaizen-agents AgentLoop (Layer 2 engine).
 
 Architecture:
     Layer 1: PRIMITIVES (kailash-kaizen) — signatures, tool protocol

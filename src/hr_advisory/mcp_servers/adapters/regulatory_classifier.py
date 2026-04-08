@@ -225,10 +225,10 @@ _DOMAIN_MODULE_MAP: dict[Domain, list[str]] = {
     Domain.LEAVE: ["leave_engine", "leave_calendar", "payroll_calculator"],
     Domain.FOREIGN_WORKERS: ["foreign_worker_compliance", "payroll_calculator"],
     Domain.WORKPLACE_SAFETY: ["compliance_checker"],
-    Domain.FAIR_EMPLOYMENT: ["compliance_checker", "advisory_engine"],
-    Domain.RETIREMENT: ["payroll_calculator", "cpf_engine", "advisory_engine"],
-    Domain.SKILLS_TRAINING: ["advisory_engine"],
-    Domain.GENERAL_EMPLOYMENT: ["advisory_engine", "compliance_checker", "kb"],
+    Domain.FAIR_EMPLOYMENT: ["compliance_checker", "arbor_advisory"],
+    Domain.RETIREMENT: ["payroll_calculator", "cpf_engine", "arbor_advisory"],
+    Domain.SKILLS_TRAINING: ["arbor_advisory"],
+    Domain.GENERAL_EMPLOYMENT: ["arbor_advisory", "compliance_checker", "kb"],
 }
 
 

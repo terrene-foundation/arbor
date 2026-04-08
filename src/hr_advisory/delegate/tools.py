@@ -172,7 +172,7 @@ def register_arbor_tools(
 
     # ── 1. KB Search ──────────────────────────────────────────
     async def _search_kb(query: str, domain: str = "", limit: int = 5) -> str:
-        from hr_advisory.agents.advisory_engine import _search_kb_with_fallback
+        from hr_advisory.delegate.kb_search import _search_kb_with_fallback
 
         results = _search_kb_with_fallback(query, domain or None, limit)
         enriched = []

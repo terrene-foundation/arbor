@@ -54,8 +54,6 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     # Mistral
     "mistral-large-latest": (2.00, 6.00),
     "mistral-small-latest": (0.10, 0.30),
-    # Ollama / local models — zero cost
-    "ollama": (0.0, 0.0),
 }
 
 # Fallback pricing for unknown models — conservative estimate
@@ -144,8 +142,15 @@ def _estimate_cost(
     input_tokens: int,
     output_tokens: int,
     model: str,
+    provider: str = "",
 ) -> float:
-    """Estimate cost in USD for given token counts and model."""
+    """Estimate cost in USD for given token counts and model.
+
+    When *provider* is ``"ollama"`` the cost is always zero — local
+    inference has no per-token billing.
+    """
+    if provider == "ollama":
+        return 0.0
     pricing = MODEL_PRICING.get(model, _FALLBACK_PRICING)
     input_cost = (input_tokens / 1_000_000) * pricing[0]
     output_cost = (output_tokens / 1_000_000) * pricing[1]
@@ -224,6 +229,7 @@ def record_usage(
     input_tokens: int,
     output_tokens: int,
     model: str,
+    provider: str = "",
 ) -> dict:
     """Record token usage after an advisory query completes.
 
@@ -239,6 +245,8 @@ def record_usage(
         input_tokens: Number of input (prompt) tokens.
         output_tokens: Number of output (completion) tokens.
         model: Model name used (for cost estimation).
+        provider: LLM provider (e.g. "openai", "ollama"). When ``"ollama"``,
+            cost is always zero.
 
     Returns:
         Updated usage record dict.
@@ -251,7 +259,7 @@ def record_usage(
         logger.error("Invalid output_tokens=%s — rejecting", output_tokens)
         raise ValueError(f"Invalid output_tokens: {output_tokens}")
 
-    cost = _estimate_cost(input_tokens, output_tokens, model)
+    cost = _estimate_cost(input_tokens, output_tokens, model, provider=provider)
     if not math.isfinite(cost):
         logger.error(
             "Cost calculation returned non-finite value for model=%s — rejecting",

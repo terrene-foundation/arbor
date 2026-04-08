@@ -14,6 +14,8 @@ import logging
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
+    from kaizen_agents.delegate.adapters import StreamingChatAdapter
+
     from hr_advisory.agents.llm_context import LLMKeyContext
 
 logger = logging.getLogger(__name__)
@@ -25,12 +27,64 @@ __all__ = [
     "delete_llm_config",
     "delete_user_llm_config",
     "build_llm_context",
+    "build_adapter_from_context",
+    "OLLAMA_TOOL_CAPABLE_FAMILIES",
+    "validate_ollama_model",
 ]
 
 # Valid provider names — validated before any DB write.
 VALID_PROVIDERS = frozenset(
     {"openai", "anthropic", "gemini", "deepseek", "mistral", "ollama", "custom"}
 )
+
+# Ollama model families that support tool calling (function calling).
+# Source: kaizen-agents OllamaStreamAdapter tool-call support matrix (2026-04-08).
+# Update procedure: bump this set when kaizen-agents adds support for more families.
+#
+# Reasoning models (qwq, qwen3) are included because they support both
+# step-by-step reasoning AND tool calls — ideal for complex HR advisory queries
+# where the model needs to plan a sequence of tool invocations.
+OLLAMA_TOOL_CAPABLE_FAMILIES: frozenset[str] = frozenset(
+    {
+        "llama3.1",
+        "llama3.2",
+        "qwen2.5",
+        "qwen3",
+        "qwq",  # Qwen with Questions — reasoning model with tool use
+        "mistral-nemo",
+        "firefunction-v2",
+        "command-r",
+        "command-r-plus",
+    }
+)
+
+
+OLLAMA_EMBEDDING_MODELS: frozenset[str] = frozenset(
+    {
+        "mxbai-embed-large",
+        "bge-large-en-v1.5",
+        "snowflake-arctic-embed",
+        "nomic-embed-text",
+    }
+)
+
+
+def validate_ollama_model(model: str) -> None:
+    """Raise ValueError if *model* is not in the tool-capable allowlist.
+
+    Strips the ``:tag`` suffix and lowercases before checking.  The allowlist
+    is family-level so users can pin a specific quantization
+    (``llama3.1:70b-instruct-q4_0``) without us maintaining the full tag matrix.
+    """
+    if not model or not model.strip():
+        raise ValueError("Ollama model is required and may not be empty.")
+    family = model.strip().lower().split(":")[0]
+    if family not in OLLAMA_TOOL_CAPABLE_FAMILIES:
+        allowed = ", ".join(sorted(OLLAMA_TOOL_CAPABLE_FAMILIES))
+        raise ValueError(
+            f"Ollama model {model!r} is not tool-capable. Arbor requires a model "
+            f"that supports tool calls. Choose from: {allowed}"
+        )
 
 
 from hr_advisory.services import dataflow_crud
@@ -327,6 +381,31 @@ def build_llm_context(
         is_byok=True,
         company_id=company_id,
         user_id=user_id,
+    )
+
+
+def build_adapter_from_context(ctx: "LLMKeyContext") -> "StreamingChatAdapter":
+    """Build a per-request StreamingChatAdapter from a resolved LLMKeyContext.
+
+    Per-request instance; never share between requests.  Raises if the context
+    is incomplete -- never silently falls back to env.
+    """
+    from kaizen_agents.delegate.adapters import get_adapter
+
+    if ctx.provider == "openai" and not ctx.api_key:
+        raise RuntimeError(
+            "OpenAI provider context has no api_key. This indicates a bug in "
+            "build_llm_context -- server-default key should have been resolved upstream."
+        )
+    if ctx.provider == "ollama" and not ctx.base_url:
+        raise RuntimeError(
+            "Ollama provider context has no base_url. Set OLLAMA_BASE_URL or save a BYOK config."
+        )
+    return get_adapter(
+        provider=ctx.provider,
+        model=ctx.model,
+        api_key=ctx.api_key,
+        base_url=ctx.base_url,
     )
 
 

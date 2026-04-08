@@ -19,6 +19,7 @@ import {
   type LLMUsage,
   type LLMProvider,
 } from "@/services/api/llm-config";
+import { ApiRequestError } from "@/services/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 /* ── Provider options ────────────────────────────────────── */
@@ -174,6 +175,7 @@ export default function AIConfigPage() {
   const [saving, setSaving] = useState(false);
   const [showByokForm, setShowByokForm] = useState(false);
   const [showOllamaForm, setShowOllamaForm] = useState(false);
+  const [ollamaModelError, setOllamaModelError] = useState("");
 
   // Load current config
   const loadConfig = useCallback(async () => {
@@ -210,6 +212,12 @@ export default function AIConfigPage() {
       toast.error("Please enter an endpoint URL.");
       return;
     }
+    if (isOllama && !modelPref.trim()) {
+      setOllamaModelError("A model name is required for Ollama.");
+      return;
+    }
+    // Clear any previous inline error before validating
+    setOllamaModelError("");
 
     // Validate first
     setValidating(true);
@@ -225,8 +233,14 @@ export default function AIConfigPage() {
         setValidating(false);
         return;
       }
-    } catch {
-      toast.error("Could not validate. Please check your input and try again.");
+    } catch (err: unknown) {
+      if (isOllama && err instanceof ApiRequestError && err.status === 400) {
+        setOllamaModelError(err.detail);
+      } else {
+        toast.error(
+          "Could not validate. Please check your input and try again.",
+        );
+      }
       setValidating(false);
       return;
     }
@@ -250,8 +264,12 @@ export default function AIConfigPage() {
       setShowByokForm(false);
       setShowOllamaForm(false);
       await loadConfig();
-    } catch {
-      toast.error("Failed to save configuration.");
+    } catch (err: unknown) {
+      if (isOllama && err instanceof ApiRequestError && err.status === 400) {
+        setOllamaModelError(err.detail);
+      } else {
+        toast.error("Failed to save configuration.");
+      }
     } finally {
       setSaving(false);
     }
@@ -631,23 +649,52 @@ export default function AIConfigPage() {
             }}
           >
             Model{" "}
-            <span style={{ fontWeight: 400, color: "var(--color-gray-400)" }}>
-              (optional — auto-detected if empty)
+            <span style={{ fontWeight: 400, color: "var(--color-red-500)" }}>
+              *
             </span>
           </label>
           <input
             type="text"
+            required
             value={modelPref}
-            onChange={(e) => setModelPref(e.target.value)}
+            onChange={(e) => {
+              setModelPref(e.target.value);
+              if (ollamaModelError) setOllamaModelError("");
+            }}
             placeholder="llama3.1:70b"
             style={{
               width: "100%",
               padding: "0.5rem",
               borderRadius: "6px",
-              border: "1px solid var(--color-gray-300)",
-              marginBottom: "1rem",
+              border: ollamaModelError
+                ? "1px solid var(--color-red-500)"
+                : "1px solid var(--color-gray-300)",
+              marginBottom: "0.25rem",
             }}
           />
+          {ollamaModelError && (
+            <p
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--color-red-600)",
+                marginBottom: "0.5rem",
+              }}
+            >
+              {ollamaModelError}
+            </p>
+          )}
+          <p
+            style={{
+              fontSize: "0.75rem",
+              color: "var(--color-gray-500)",
+              marginBottom: "1rem",
+            }}
+          >
+            e.g. <code style={{ fontSize: "0.75rem" }}>llama3.1:70b</code>,{" "}
+            <code style={{ fontSize: "0.75rem" }}>qwen2.5:32b</code>,{" "}
+            <code style={{ fontSize: "0.75rem" }}>mistral-nemo:12b</code>. Only
+            models that support tool calls are allowed.
+          </p>
 
           <div
             style={{
@@ -679,6 +726,7 @@ export default function AIConfigPage() {
               onClick={() => {
                 setShowOllamaForm(false);
                 setBaseUrl("");
+                setOllamaModelError("");
               }}
             >
               Cancel

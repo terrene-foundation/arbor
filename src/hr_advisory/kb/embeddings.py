@@ -1,35 +1,156 @@
-"""Embedding pipeline for knowledge base provisions.
+"""Provider-aware embedding pipeline for knowledge base provisions.
 
-Generates OpenAI text embeddings and stores them via pgvector for
-semantic search over provisions. Gracefully handles missing API keys
-by skipping with a warning rather than raising.
+Generates embeddings via either OpenAI (text-embedding-3-large, 1024-dim)
+or Ollama (mxbai-embed-large, native 1024-dim) depending on the resolved
+LLM context. No silent fallbacks — every error raises with an actionable
+message per zero-tolerance.md Rule 3.
 """
+
+from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from kailash.runtime import LocalRuntime
 from kailash.workflow.builder import WorkflowBuilder
 
+if TYPE_CHECKING:
+    from hr_advisory.agents.llm_context import LLMKeyContext
+
 logger = logging.getLogger(__name__)
+
+# Canonical embedding dimensions — must match vector_setup.VECTOR_DIMENSIONS
+EMBEDDING_DIMENSIONS = 1024
 
 
 class EmbeddingPipeline:
-    """Generates and stores embeddings for KB provisions."""
+    """Generates and stores embeddings for KB provisions.
 
-    def __init__(self, model: str | None = None):
+    Provider-aware: dispatches on ``ctx.provider`` to either the OpenAI
+    or Ollama embedding API.  Both produce 1024-dim vectors.
+    """
+
+    def __init__(self, ctx: LLMKeyContext | None = None):
         """Initialise the embedding pipeline.
 
         Args:
-            model: The OpenAI embedding model to use. Defaults to
-                   EMBEDDING_MODEL from .env, falling back to
-                   "text-embedding-3-small".
+            ctx: Resolved LLM context.  When None, falls back to
+                 ``LLMKeyContext.from_server_env()`` for the server's
+                 default provider.
         """
-        import os
+        if ctx is None:
+            from hr_advisory.agents.llm_context import LLMKeyContext
 
-        self.model = model or os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+            ctx = LLMKeyContext.from_server_env()
+        self._ctx = ctx
         self._runtime = LocalRuntime()
+
+    # ------------------------------------------------------------------
+    # Core embedding dispatch
+    # ------------------------------------------------------------------
+
+    def generate_embedding(self, text: str) -> list[float]:
+        """Generate a 1024-dim embedding via the provider in self._ctx.
+
+        Raises RuntimeError on any failure — no silent fallback.
+        """
+        if self._ctx.provider == "ollama":
+            return self._embed_ollama(text)
+        return self._embed_openai_compatible(text)
+
+    def _embed_ollama(self, text: str) -> list[float]:
+        """Generate embedding via Ollama's /api/embeddings endpoint."""
+        import httpx
+
+        base_url = self._ctx.base_url
+        if not base_url:
+            raise RuntimeError(
+                "Ollama embedding requires OLLAMA_BASE_URL. "
+                "Set it in .env or save a BYOK config."
+            )
+
+        model = os.environ.get("EMBEDDING_MODEL_OLLAMA", "mxbai-embed-large")
+        url = f"{base_url.rstrip('/')}/api/embeddings"
+
+        try:
+            resp = httpx.post(
+                url,
+                json={"model": model, "prompt": text},
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+        except httpx.ConnectError:
+            raise RuntimeError(
+                f"Cannot reach Ollama at {base_url}. "
+                f"Check that the server is running and {model} is pulled."
+            )
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Ollama embedding request failed: {exc.response.status_code}. "
+                f"Check that {model} is pulled: ollama pull {model}"
+            ) from exc
+
+        embedding = resp.json().get("embedding", [])
+        if len(embedding) != EMBEDDING_DIMENSIONS:
+            raise RuntimeError(
+                f"Expected {EMBEDDING_DIMENSIONS}-dim embedding from {model}, "
+                f"got {len(embedding)}. Check that {model} is pulled on the "
+                f"Ollama server."
+            )
+        return embedding
+
+    def _embed_openai_compatible(self, text: str) -> list[float]:
+        """Generate embedding via OpenAI (or compatible) API."""
+        api_key = self._ctx.api_key
+        if not api_key:
+            raise RuntimeError(
+                "OpenAI embedding requires OPENAI_API_KEY. "
+                "Set it in .env or configure a BYOK key."
+            )
+
+        model = os.environ.get("EMBEDDING_MODEL_OPENAI", "text-embedding-3-large")
+
+        try:
+            import openai
+
+            client = openai.OpenAI(
+                api_key=api_key,
+                base_url=self._ctx.base_url,
+            )
+            response = client.embeddings.create(
+                input=text,
+                model=model,
+                dimensions=EMBEDDING_DIMENSIONS,
+            )
+            return response.data[0].embedding
+        except ImportError:
+            raise RuntimeError("openai package not installed. Run: pip install openai")
+
+    # ------------------------------------------------------------------
+    # Provision text formatting
+    # ------------------------------------------------------------------
+
+    def generate_provision_text(self, provision: dict) -> str:
+        """Combine provision fields into optimal embedding text."""
+        parts = []
+        section = provision.get("section", "")
+        if section:
+            parts.append(f"Section: {section}")
+        title = provision.get("title", "")
+        if title:
+            parts.append(f"Title: {title}")
+        plain_summary = provision.get("plain_summary", "")
+        if plain_summary:
+            parts.append(plain_summary)
+        formal_text = provision.get("formal_text", "")
+        if formal_text:
+            parts.append(formal_text)
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Single-node workflow helpers
+    # ------------------------------------------------------------------
 
     def _execute(self, node_type: str, node_id: str, params: dict) -> dict:
         """Run a single-node workflow and return the node result."""
@@ -47,84 +168,16 @@ class EmbeddingPipeline:
             return result["records"]
         return []
 
-    def _get_api_key(self) -> Optional[str]:
-        """Get the OpenAI API key from environment.
-
-        Returns None if no key is set, allowing callers to skip
-        gracefully.
-        """
-        key = os.environ.get("OPENAI_API_KEY", "")
-        if not key or not key.strip():
-            return None
-        return key.strip()
-
-    def generate_embedding(self, text: str) -> Optional[list[float]]:
-        """Generate a single embedding via OpenAI API.
-
-        Returns:
-            List of floats (the embedding vector), or None if the API
-            key is missing or the call fails.
-        """
-        api_key = self._get_api_key()
-        if not api_key:
-            logger.warning(
-                "OPENAI_API_KEY not set. Skipping embedding generation. "
-                "Set the key in .env to enable embeddings."
-            )
-            return None
-
-        try:
-            import openai
-
-            client = openai.OpenAI(api_key=api_key)
-            response = client.embeddings.create(
-                input=text,
-                model=self.model,
-            )
-            return response.data[0].embedding
-        except ImportError:
-            logger.error("openai package not installed. Run: pip install openai")
-            return None
-        except Exception as exc:
-            logger.error("Embedding generation failed: %s", exc)
-            return None
-
-    def generate_provision_text(self, provision: dict) -> str:
-        """Combine provision fields into optimal embedding text.
-
-        Format:
-            Section: {section}
-            Title: {title}
-            {plain_summary}
-            {formal_text}
-        """
-        parts = []
-
-        section = provision.get("section", "")
-        if section:
-            parts.append(f"Section: {section}")
-
-        title = provision.get("title", "")
-        if title:
-            parts.append(f"Title: {title}")
-
-        plain_summary = provision.get("plain_summary", "")
-        if plain_summary:
-            parts.append(plain_summary)
-
-        formal_text = provision.get("formal_text", "")
-        if formal_text:
-            parts.append(formal_text)
-
-        return "\n".join(parts)
+    # ------------------------------------------------------------------
+    # Single provision embedding
+    # ------------------------------------------------------------------
 
     def embed_provision(self, provision_id: int) -> bool:
         """Generate and store embedding for a single provision.
 
-        Returns:
-            True if the embedding was generated and stored, False otherwise.
+        Returns True if the embedding was generated and stored.
+        Raises RuntimeError on provider configuration errors.
         """
-        # Read the provision
         try:
             provision = self._execute("ProvisionReadNode", "read_prov", {"id": provision_id})
         except Exception as exc:
@@ -141,16 +194,11 @@ class EmbeddingPipeline:
             return False
 
         embedding = self.generate_embedding(text)
-        if embedding is None:
-            return False
 
         # Store embedding via pgvector
         try:
-            from hr_advisory.models.vector_setup import get_vector_adapter
-            import asyncio
             import sqlalchemy
 
-            adapter = get_vector_adapter()
             database_url = os.environ.get("DATABASE_URL", "")
             engine = sqlalchemy.create_engine(database_url)
             with engine.connect() as conn:
@@ -166,46 +214,31 @@ class EmbeddingPipeline:
             logger.error("Failed to store embedding for provision %s: %s", provision_id, exc)
             return False
 
+    # ------------------------------------------------------------------
+    # Batch embedding
+    # ------------------------------------------------------------------
+
     def embed_all_provisions(self, batch_size: int = 50) -> dict:
-        """Batch embed all provisions that don't have embeddings yet.
+        """Batch embed all provisions.
 
-        Gracefully handles missing API keys by returning a status dict
-        with ``skipped`` information instead of raising.
-
-        Args:
-            batch_size: Number of provisions to process in each batch.
-
-        Returns:
-            Dict with keys: total, embedded, skipped, errors.
+        Returns dict with keys: total, embedded, skipped, errors.
+        Raises RuntimeError if no provider is configured.
         """
         result = {"total": 0, "embedded": 0, "skipped": 0, "errors": 0}
 
-        # Check API key first
-        api_key = self._get_api_key()
-        if not api_key:
-            logger.warning(
-                "OPENAI_API_KEY not set. Skipping all embeddings. "
-                "Set the key in .env to enable embeddings."
-            )
-            # Count total provisions so the caller knows what was skipped
-            all_provisions_raw = self._execute("ProvisionListNode", "all_provs", {"filter": {}})
-            all_provisions = self._extract_records(all_provisions_raw)
-            result["total"] = len(all_provisions)
-            result["skipped"] = len(all_provisions)
-            return result
-
-        # Get all provisions
         all_provisions_raw = self._execute("ProvisionListNode", "all_provs", {"filter": {}})
         all_provisions = self._extract_records(all_provisions_raw)
-
         result["total"] = len(all_provisions)
 
         for provision in all_provisions:
-            success = self.embed_provision(provision["id"])
-            if success:
-                result["embedded"] += 1
-            else:
-                result["skipped"] += 1
+            try:
+                success = self.embed_provision(provision["id"])
+                if success:
+                    result["embedded"] += 1
+                else:
+                    result["skipped"] += 1
+            except Exception:
+                result["errors"] += 1
 
         logger.info(
             "Embedding batch complete: %d total, %d embedded, %d skipped, %d errors",

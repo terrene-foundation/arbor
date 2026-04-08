@@ -226,10 +226,27 @@ class TestEstimateCost:
         expected = (2000 / 1_000_000) * 3.00 + (1000 / 1_000_000) * 15.00
         assert cost == pytest.approx(expected)
 
-    def test_ollama_zero_cost(self) -> None:
-        """Ollama models have zero cost."""
-        cost = _estimate_cost(100000, 50000, "ollama")
+    def test_estimate_cost_ollama_returns_zero(self) -> None:
+        """Ollama provider short-circuits to zero cost regardless of model (T117 Q3)."""
+        cost = _estimate_cost(100000, 50000, "llama3.1:70b", provider="ollama")
         assert cost == 0.0
+
+    def test_estimate_cost_ollama_returns_zero_unknown_model(self) -> None:
+        """Ollama provider returns zero even for unknown model names."""
+        cost = _estimate_cost(10000, 5000, "some-custom-local-model", provider="ollama")
+        assert cost == 0.0
+
+    def test_estimate_cost_unknown_cloud_model_returns_fallback_pricing(self) -> None:
+        """Unknown cloud model (provider=openai) uses fallback pricing, not zero."""
+        cost = _estimate_cost(1000, 1000, "some-unknown-cloud-model", provider="openai")
+        expected = (1000 / 1_000_000) * 2.50 + (1000 / 1_000_000) * 10.00
+        assert cost == pytest.approx(expected)
+
+    def test_estimate_cost_openai_returns_real_rate(self) -> None:
+        """OpenAI provider with known model returns real rate, not zero."""
+        cost = _estimate_cost(1000, 500, "gpt-5-mini", provider="openai")
+        expected = (1000 / 1_000_000) * 0.25 + (500 / 1_000_000) * 2.00
+        assert cost == pytest.approx(expected)
 
     def test_unknown_model_uses_fallback_pricing(self) -> None:
         """Unknown model names use the conservative fallback pricing."""
@@ -285,10 +302,13 @@ class TestModelPricing:
         assert "mistral-large-latest" in MODEL_PRICING
         assert "mistral-small-latest" in MODEL_PRICING
 
-    def test_has_ollama_entry(self) -> None:
-        """MODEL_PRICING includes ollama at zero cost."""
-        assert "ollama" in MODEL_PRICING
-        assert MODEL_PRICING["ollama"] == (0.0, 0.0)
+    def test_model_pricing_no_longer_has_ollama_entry(self) -> None:
+        """Regression (T117 L3): MODEL_PRICING['ollama'] was a misleading dead entry.
+
+        Ollama cost is now handled by the provider-aware short-circuit in
+        _estimate_cost(provider="ollama"), not a pricing table entry.
+        """
+        assert "ollama" not in MODEL_PRICING
 
     def test_all_prices_are_non_negative(self) -> None:
         """All pricing entries should be non-negative tuples."""
@@ -424,3 +444,27 @@ class TestRecordUsageValidation:
                 output_tokens=50,
                 model="gpt-5-mini",
             )
+
+    @patch("hr_advisory.services.llm_budget._get_or_create_usage")
+    @patch("hr_advisory.services.dataflow_crud.update")
+    def test_record_usage_ollama_records_zero_cost(self, mock_exec, mock_get_usage) -> None:
+        """record_usage() records zero cost when provider=ollama (T117 Q3)."""
+        mock_get_usage.return_value = _mock_usage(
+            estimated_cost=0.0,
+            query_count=0,
+            input_tokens=0,
+            output_tokens=0,
+            usage_id=99,
+        )
+        mock_exec.return_value = {}
+
+        result = record_usage(
+            company_id=1,
+            input_tokens=5000,
+            output_tokens=2000,
+            model="llama3.1:70b",
+            provider="ollama",
+        )
+
+        assert result["last_query_cost"] == 0.0
+        assert result["estimated_cost"] == 0.0

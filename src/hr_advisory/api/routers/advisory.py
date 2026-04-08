@@ -1,15 +1,14 @@
 """Advisory query endpoints.
 
-Handles HR advisory queries with the full safety chain:
+Handles HR advisory queries with the safety chain:
 1. Input sanitisation and validation
 2. Rate limiting
-3. Query screening (guardrails — circumvention/escalation detection)
-4. EATP genesis record and trust chain creation
-5. Anti-amnesia constraint injection
-6. Knowledge base retrieval (citation validator)
-7. Disclaimer generation (risk-tiered)
-8. Response content screening
-9. Trust chain recording
+3. EATP genesis record and trust chain creation
+4. Autonomous Delegate (scope, injection, escalation, circumvention via system prompt)
+5. Citation validation
+6. Risk-tiered disclaimer
+7. Response content screening (output guard)
+8. Trust chain recording
 """
 
 import asyncio
@@ -40,21 +39,20 @@ from hr_advisory.workflows.guardrails import (
     ScreeningResult,
     check_confidence_escalation,
     check_rate_limit,
-    screen_injection,
-    screen_query,
     screen_response,
-    screen_scope,
 )
 
 from hr_advisory.agents.config import (
     install_kaizen_provider_patch,
 )
 from hr_advisory.agents.memory.short_term import ShortTermMemory
-from hr_advisory.services.llm_config import build_llm_context
+from hr_advisory.services.llm_config import build_adapter_from_context, build_llm_context
 from hr_advisory.services.llm_budget import check_budget, record_usage
 from hr_advisory.services.llm_metrics import log_llm_call, log_budget_warning, log_budget_exceeded
 
 logger = logging.getLogger(__name__)
+
+ARBOR_DELEGATE_VERSION = "v3.0.0"
 
 router = APIRouter()
 
@@ -184,15 +182,14 @@ async def advisory_query(
 ):
     """Submit an HR advisory question and receive a structured response.
 
-    Full safety chain:
+    Safety chain:
     1. Sanitise input
     2. Rate limit check
-    3. Guardrail screening
+    3. Autonomous Delegate (scope/injection/escalation via system prompt)
     4. EATP trust chain creation
-    5. Domain detection and KB lookup
-    6. Citation validation
-    7. Risk-tiered disclaimer
-    8. Response screening
+    5. Citation validation
+    6. Risk-tiered disclaimer
+    7. Response content screening (output guard)
     """
     body = await request.json()
     query_raw = body.get("query", "")
@@ -223,71 +220,7 @@ async def advisory_query(
             detail="You've sent too many requests. Please wait a moment and try again.",
         )
 
-    # ── Step 2b: Scope check (is this an HR question?) ──────────
-    scope_result = screen_scope(query)
-    if scope_result.result == ScreeningResult.BLOCK:
-        return {
-            "query": query,
-            "response": scope_result.reason,
-            "alternative_guidance": scope_result.alternative_guidance,
-            "risk_tier": "green",
-            "confidence_score": 1.0,
-            "out_of_scope": True,
-            "provisions_cited": [],
-            "company_id": company_id,
-            "conversation_id": conversation_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    # ── Step 2c: Prompt injection detection ───────────────────
-    injection_result = screen_injection(query, user_id=user_id)
-    if injection_result.result == ScreeningResult.BLOCK:
-        return {
-            "query": query,
-            "response": injection_result.reason,
-            "risk_tier": "red",
-            "confidence_score": 1.0,
-            "blocked": True,
-            "provisions_cited": [],
-            "company_id": company_id,
-            "conversation_id": conversation_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    # ── Step 3: Query screening (circumvention + escalation) ──
-    screening = screen_query(query, user_id=user_id)
-
-    if screening.result == ScreeningResult.BLOCK:
-        return {
-            "query": query,
-            "response": screening.reason,
-            "alternative_guidance": screening.alternative_guidance,
-            "risk_tier": "red",
-            "confidence_score": 0.0,
-            "blocked": True,
-            "provisions_cited": [],
-            "company_id": company_id,
-            "conversation_id": conversation_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    if screening.result == ScreeningResult.ESCALATE:
-        return {
-            "query": query,
-            "response": screening.reason,
-            "risk_tier": "red",
-            "confidence_score": 0.0,
-            "escalated": True,
-            "escalation_reason": (
-                screening.escalation_reason.value if screening.escalation_reason else None
-            ),
-            "provisions_cited": [],
-            "company_id": company_id,
-            "conversation_id": conversation_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    # ── Step 3b: Load conversation memory ───────────────────────
+    # ── Step 3: Load conversation memory ──────────────────────────
     conv_key = str(conversation_id)
     memory = _conversation_memory.setdefault(conv_key, ShortTermMemory())
     _touch_conversation(conv_key)
@@ -370,13 +303,14 @@ async def advisory_query(
         "name": current_user.get("name", ""),
     }
 
+    adapter = build_adapter_from_context(llm_context) if llm_context else None
+
     delegate_config = DelegateConfig(
-        model=getattr(llm_context, "model", "") or "",
-        api_key=getattr(llm_context, "api_key", "") or "",
-        base_url=getattr(llm_context, "base_url", None),
         company_id=int(effective_company_id) if effective_company_id else None,
         company_context=company_profile,
         user_context=_user_ctx,
+        adapter=adapter,
+        require_server_default=True,
     )
 
     loop = asyncio.get_event_loop()
@@ -407,7 +341,7 @@ async def advisory_query(
         user_verification_level=TrustLevel.STANDARD,
         company_profile_completeness=0.8 if company_profile else (0.5 if company_id else 0.3),
         kb_currency_status={d: "2026-03-01" for d in domains},
-        agent_version_hashes={"advisory_engine": "v2.0.0"},
+        agent_version_hashes={"arbor_delegate": ARBOR_DELEGATE_VERSION},
         query_text=query,
         query_domains=domains,
     )
@@ -454,9 +388,9 @@ async def advisory_query(
 
     # ── Step 12: Record attestation in trust chain ──────────────
     attestation = AgentAttestation(
-        agent_id="advisory_engine",
+        agent_id="arbor_delegate",
         agent_role=AgentRole.ORCHESTRATOR,
-        agent_version="v2.0.0",
+        agent_version=ARBOR_DELEGATE_VERSION,
         domain=",".join(domains),
         provisions_retrieved=_cited_ids,
         reasoning_summary=f"Autonomous engine: domains={domains}, tools={engine_result.get('tools_called', [])}",
@@ -513,6 +447,7 @@ async def advisory_query(
                 input_tokens=_real_input_tokens,
                 output_tokens=_real_output_tokens,
                 model=llm_context.model or "unknown",
+                provider=llm_context.provider,
             )
             log_llm_call(
                 company_id=int(effective_company_id),
@@ -568,14 +503,6 @@ async def advisory_query(
 
     return advisory_response
 
-    # --- Dead code removed (2026-03-24) ---
-    # The following functions were part of the old Kaizen pipeline that was
-    # replaced by AdvisoryEngine (LLM ReAct loop in advisory_engine.py):
-    #   _get_provision_details, _generate_topic_intro, _get_domain_context,
-    #   _fallback_response, _run_llm_advisory
-    # ~1000 lines of keyword routing, deterministic dispatch, and hardcoded
-    # domain maps removed. The LLM IS the router now.
-
 
 @router.post("/stream")
 async def advisory_stream(
@@ -612,66 +539,7 @@ async def advisory_stream(
     if not check_rate_limit(user_id):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait.")
 
-    # ── Step 2b: Scope check ─────────────────────────────────────
-    scope_result = screen_scope(query)
-    if scope_result.result == ScreeningResult.BLOCK:
-        # Return as proper SSE events (event: type prefix required
-        # for the frontend parseSSEChunk/processEvent dispatcher).
-        async def _scope_decline():
-            start_data = json.dumps({"conversation_id": conversation_id})
-            yield f"event: start\ndata: {start_data}\n\n"
-            decline_data = json.dumps(
-                {
-                    "response": scope_result.reason,
-                    "out_of_scope": True,
-                    "risk_tier": "green",
-                    "confidence_score": 1.0,
-                    "conversation_id": conversation_id,
-                }
-            )
-            yield f"event: complete\ndata: {decline_data}\n\n"
-
-        return StreamingResponse(_scope_decline(), media_type="text/event-stream")
-
-    # ── Step 2c: Prompt injection detection ───────────────────
-    injection_result = screen_injection(query, user_id=user_id)
-    if injection_result.result == ScreeningResult.BLOCK:
-
-        async def _injection_decline():
-            start_data = json.dumps({"conversation_id": conversation_id})
-            yield f"event: start\ndata: {start_data}\n\n"
-            decline_data = json.dumps(
-                {
-                    "response": injection_result.reason,
-                    "risk_tier": "red",
-                    "confidence_score": 1.0,
-                    "conversation_id": conversation_id,
-                }
-            )
-            yield f"event: complete\ndata: {decline_data}\n\n"
-
-        return StreamingResponse(_injection_decline(), media_type="text/event-stream")
-
-    # ── Step 3: Query screening (circumvention + escalation) ──
-    screening = screen_query(query, user_id=user_id)
-    if screening.result in (ScreeningResult.BLOCK, ScreeningResult.ESCALATE):
-
-        async def _screening_decline():
-            start_data = json.dumps({"conversation_id": conversation_id})
-            yield f"event: start\ndata: {start_data}\n\n"
-            decline_data = json.dumps(
-                {
-                    "response": screening.reason,
-                    "risk_tier": "red",
-                    "confidence_score": 1.0,
-                    "conversation_id": conversation_id,
-                }
-            )
-            yield f"event: complete\ndata: {decline_data}\n\n"
-
-        return StreamingResponse(_screening_decline(), media_type="text/event-stream")
-
-    # ── Step 3b: Load conversation memory ───────────────────────
+    # ── Step 3: Load conversation memory ──────────────────────────
     conv_key = str(conversation_id)
     memory = _conversation_memory.setdefault(conv_key, ShortTermMemory())
     _touch_conversation(conv_key)
@@ -745,18 +613,15 @@ async def advisory_stream(
         "name": current_user.get("name", ""),
     }
 
+    adapter = build_adapter_from_context(llm_context) if llm_context else None
+
     delegate_config = DelegateConfig(
         company_id=int(effective_company_id) if effective_company_id else None,
         company_context=company_profile,
         user_context=_stream_user_ctx,
+        adapter=adapter,
+        require_server_default=True,
     )
-    # Pass BYOK key if available
-    if llm_context and llm_context.api_key:
-        delegate_config.api_key = llm_context.api_key
-    if llm_context and llm_context.base_url:
-        delegate_config.base_url = llm_context.base_url
-    if llm_context and llm_context.model:
-        delegate_config.model = llm_context.model
 
     delegate_loop = create_delegate(delegate_config)
 

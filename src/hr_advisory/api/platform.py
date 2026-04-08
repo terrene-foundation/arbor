@@ -173,7 +173,7 @@ def _register_handlers(app: Nexus, session_store) -> None:
     """Register handler-based workflows for multi-channel access.
 
     These handlers are available via API, CLI, and MCP simultaneously.
-    They wrap the router logic so that the same advisory functionality
+    They wrap the router logic so that the same functionality
     is accessible from any channel.
 
     Security note: These handlers are invoked outside FastAPI's dependency
@@ -182,66 +182,6 @@ def _register_handlers(app: Nexus, session_store) -> None:
     (CLI SSO, MCP transport auth). The HTTP API routes (which use
     Depends(get_current_user)) are the primary web-facing interface.
     """
-
-    @app.handler("advisory_query", description="Submit an HR advisory question")
-    async def advisory_query_handler(
-        query: str,
-        company_id: int = 0,
-        conversation_id: int = 0,
-    ) -> dict:
-        """Multi-channel handler for HR advisory queries.
-
-        Uses the AdvisoryEngine (LLM function-calling loop) with the full
-        safety chain: sanitisation, screening, KB lookup, citation
-        validation, and response generation.
-        """
-        import asyncio
-
-        from hr_advisory.agents.advisory_engine import AdvisoryEngine
-        from hr_advisory.security.validation import sanitise_input
-        from hr_advisory.workflows.guardrails import ScreeningResult, screen_query
-
-        clean_query = sanitise_input(query)
-        screening = screen_query(clean_query)
-
-        if screening.result == ScreeningResult.BLOCK:
-            return {
-                "query": clean_query,
-                "response": screening.reason,
-                "risk_tier": "red",
-                "confidence_score": 0.0,
-                "blocked": True,
-            }
-
-        if screening.result == ScreeningResult.ESCALATE:
-            return {
-                "query": clean_query,
-                "response": screening.reason,
-                "risk_tier": "red",
-                "confidence_score": 0.0,
-                "escalated": True,
-            }
-
-        engine = AdvisoryEngine()
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: engine.run(
-                query=clean_query,
-                conversation_history=[],
-                company_id=company_id or None,
-            ),
-        )
-
-        return {
-            "query": clean_query,
-            "response": result.get("response_text", ""),
-            "provisions_cited": result.get("citations", []),
-            "risk_tier": result.get("risk_tier", "amber"),
-            "confidence_score": result.get("confidence", 0.7),
-            "company_id": company_id or None,
-            "conversation_id": conversation_id or None,
-        }
 
     @app.handler("compliance_check", description="Run a compliance check")
     async def compliance_check_handler(

@@ -50,9 +50,9 @@ class TargetAgent:
     TAX = "tax_specialist"
     WSH = "wsh_specialist"
     PDPA = "pdpa_specialist"
-    QUERY_ANALYZER = "query_analyzer"
+    QUERY_ANALYZER = "query_analyzer"  # historical-only
     ORCHESTRATOR = "orchestrator"
-    RESPONSE_SYNTHESIZER = "response_synthesizer"
+    RESPONSE_SYNTHESIZER = "response_synthesizer"  # historical-only
 
 
 class PatchStatus:
