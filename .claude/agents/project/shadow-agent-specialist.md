@@ -202,3 +202,16 @@ POST /shadow/execute
 - Executor MUST validate path parameters before substitution.
 - Formatter MUST prefix all responses with "Arbor: ".
 - Frontend PaceCard MUST enforce cooldown visually (disable confirm button during countdown).
+
+### C1 fix — per-request adapter injection (v0.4.0+)
+
+Shadow `/execute` constructs `DelegateConfig` the same way the advisory router does. When modifying shadow.py's Delegate construction:
+
+- MUST call `build_llm_context(company_id, user_id)` before constructing the delegate
+- MUST call `build_adapter_from_context(llm_context)` to build a per-request adapter
+- MUST pass `adapter=adapter, require_server_default=True` into `DelegateConfig`
+- MUST refuse the request with HTTP 403 when `company_id` is missing (tenant isolation — shadow agent cannot fall back to server defaults because its tool calls would run against an unknown tenant scope)
+
+**Historical regression:** Round 15 security review (journal 0015) caught a CRITICAL regression where shadow.py was constructing `DelegateConfig(jwt_token=..., company_id=..., user_context=...)` with NO adapter. This fell through to the env-fallback path and re-introduced the C1 multi-tenant env leak that advisory.py had already eliminated. The fix mirrors advisory.py's pattern verbatim.
+
+**Rule:** when modifying `DelegateConfig` or `create_delegate`, MUST grep ALL constructor call sites (`rg "DelegateConfig\(" src/hr_advisory/api/routers/`) and verify each one passes `adapter=` AND `require_server_default=True`. The plan may name only some call sites; red team MUST enumerate the full list.

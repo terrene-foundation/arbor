@@ -105,6 +105,55 @@ def test_issue_42_user_creation_preserves_explicit_id():
 
 **Why:** E2E tests are the last gate before users — any abstraction here means the test validates something other than what users actually experience.
 
+## Multi-Turn Protocol Testing (LLM / streaming / wire-level)
+
+For features that touch multi-turn LLM protocols, streaming responses, or cross-process wire formats (HTTP chunked encoding, SSE, NDJSON, gRPC streams), Tier-1 unit tests are **NOT sufficient**. The bug pattern:
+
+- Turn 1 sends a request, gets a response. Parsing works. Test passes.
+- Turn 2 sends a follow-up with history from turn 1. The serializer uses one format (e.g., OpenAI's stringified tool args); the downstream parser expects another (e.g., Ollama's object tool args). Turn 2 fails with HTTP 400.
+- Unit tests with mocks never simulate turn 2's round-trip faithfully, so they pass with 100% green while production is broken.
+
+**This happened in Arbor round 16:** kaizen-agents OllamaStreamAdapter passed 1165 unit tests while the entire Ollama tool-call path was broken on turn 2. The bug only surfaced when a real Ollama server rejected the stringified tool-call arguments in the follow-up request. Filed as kailash-py#361. See `journal/0016-DISCOVERY-kaizen-m4-bug-confirmed-live.md`.
+
+### MUST Rule: Live integration test before merging LLM-touching PRs
+
+For any PR that touches:
+
+- LLM adapter wire format (serialization of messages, tool_calls, usage)
+- Streaming event parsing (NDJSON, SSE, chunked responses)
+- Multi-turn conversation history (assistant tool_calls replayed in next request)
+- Cross-provider abstractions (OpenAI ↔ Ollama ↔ Anthropic ↔ Gemini)
+
+the PR MUST include at least one **live integration test** that sends a real multi-turn request through real infrastructure (local Ollama, real OpenAI API, or equivalent) — not just unit tests with mocked transports. The live test should fail on the buggy codebase and pass on the fix.
+
+**Why:** The wire format is the contract. A mocked transport that mirrors your own serializer tautologically passes whatever your serializer produces. Only a real endpoint can tell you whether the wire format is valid. For multi-turn specifically, only a full round-trip surfaces the serializer/parser mismatch on turn 2.
+
+### DO / DO NOT
+
+```python
+# DO — real Ollama round-trip, no mocking
+async def test_multi_turn_tool_call_via_real_ollama():
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    adapter = OllamaStreamAdapter(base_url="http://localhost:11434", default_model="qwen3:latest")
+    config = DelegateConfig(adapter=adapter, require_server_default=True)
+    result = run_delegate_sync("What does Section 12 of the Singapore Employment Act say?", config=config)
+    assert "search_kb" in result["tools_called"]  # turn 1 fired the tool
+    assert result["response_text"]  # turn 2 composed a real answer
+```
+
+```python
+# DO NOT — mocks the wire format and asserts a tautology
+def test_multi_turn_tool_call_mocked():
+    mock_response = MagicMock()
+    mock_response.message = {"tool_calls": [{"function": {"arguments": '{"q": "x"}'}}]}
+    # ... the test asserts that OUR serializer produces the format we already
+    # hardcoded in the mock. It cannot catch a real wire-format mismatch.
+```
+
+### Exception
+
+If the repo has no live infrastructure available (no local Ollama, no API key), document the constraint in the PR description AND open a follow-up issue to add the test once infrastructure is in place. Never ship the PR claiming test coverage for a wire-format change without a live test somewhere in the chain (CI, staging, or local).
+
 ```
 tests/
 ├── regression/     # Permanent bug reproduction
