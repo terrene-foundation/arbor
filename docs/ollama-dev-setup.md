@@ -2,13 +2,15 @@
 
 **Audience:** Arbor developers + company admins configuring BYOK on a self-hosted Ollama endpoint. This guide walks you from zero to a working Arbor instance that answers Singapore HR queries via local Ollama, with zero cloud dependency.
 
+> **No source rebuild needed.** Switching Arbor to Ollama is a **configuration change only** — no `docker build`, no `npm run build`, no image rebuild. Pre-built images are on Docker Hub (`terrenefoundation/arbor-backend`, `terrenefoundation/arbor-frontend`); you pull them with `docker compose pull` and restart. The only thing you "build" for Ollama is pulling the models themselves with `ollama pull`.
+
 ## TL;DR
 
 ```bash
 # 1. Install Ollama (if not already)
 curl -fsSL https://ollama.com/install.sh | sh
 
-# 2. Pull the two required models (~6 GB total)
+# 2. Pull the two required models (~6 GB total — this is the only "build" step)
 ollama pull qwen3:latest           # chat / tool-calling (~5.2 GB)
 ollama pull mxbai-embed-large      # KB embeddings (~670 MB)
 
@@ -18,12 +20,37 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen3:latest
 EMBEDDING_MODEL_OLLAMA=mxbai-embed-large
 
-# 4. Restart Arbor
+# 4. Restart Arbor — RESTART only, not rebuild
 docker compose restart backend
 # or, if running locally: .venv/bin/python -m hr_advisory.api.server
 ```
 
 That's it. Arbor's advisory queries will now route through your local Ollama.
+
+## Deploying a pre-built Arbor release (no source needed)
+
+If you don't have the Arbor source checked out — e.g. you're a company deploying a tagged release on your own infrastructure, or your dev environment cannot build on Kubernetes — you can run Arbor entirely from pre-built Docker Hub images:
+
+```bash
+# 1. Grab the deploy/docker-compose.prod.yml and deploy/Caddyfile from the release tag
+curl -O https://raw.githubusercontent.com/terrene-foundation/arbor/v0.4.0/deploy/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/terrene-foundation/arbor/v0.4.0/deploy/Caddyfile
+
+# 2. Create .env.prod with your config (see .env.production.template in the release)
+# Include the Ollama block from the TL;DR above.
+
+# 3. Pull the pre-built images and start
+ARBOR_VERSION=0.4.0 docker compose -f docker-compose.prod.yml --env-file .env.prod pull backend frontend
+ARBOR_VERSION=0.4.0 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+# 4. Verify
+docker ps --format 'table {{.Names}}\t{{.Status}}'
+curl -sf http://localhost:8000/health
+```
+
+Arbor's `deploy/ship.sh <version>` script automates steps 1-4 against a remote GCE instance via `gcloud compute ssh` — use it if you have the full repo checked out.
+
+**This path never invokes a build command.** The images on Docker Hub are multi-arch (`linux/amd64` and `linux/arm64`), so they work on x86 servers, Apple Silicon dev machines, and ARM production nodes alike.
 
 ## Why two models?
 
