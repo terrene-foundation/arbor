@@ -159,7 +159,7 @@ function StatusBadge({ status }: { status: string }) {
 /* ── Main page ───────────────────────────────────────────── */
 
 export default function AIConfigPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const companyId = user?.company_id;
 
   const [config, setConfig] = useState<LLMConfig | null>(null);
@@ -179,7 +179,10 @@ export default function AIConfigPage() {
 
   // Load current config
   const loadConfig = useCallback(async () => {
-    if (!companyId) return;
+    if (!companyId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [cfg, usg] = await Promise.all([
@@ -194,8 +197,10 @@ export default function AIConfigPage() {
   }, [companyId]);
 
   useEffect(() => {
+    // Wait for auth to finish before deciding whether we have a company.
+    if (authLoading) return;
     loadConfig();
-  }, [loadConfig]);
+  }, [authLoading, loadConfig]);
 
   // Validate & save
   const handleSave = async () => {
@@ -294,7 +299,7 @@ export default function AIConfigPage() {
     }
   };
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div style={{ padding: "2rem", textAlign: "center" }}>
         <Loader2
@@ -305,6 +310,54 @@ export default function AIConfigPage() {
         <p style={{ marginTop: "0.5rem", color: "var(--color-gray-500)" }}>
           Loading AI settings...
         </p>
+      </div>
+    );
+  }
+
+  if (!companyId) {
+    return (
+      <div style={{ maxWidth: "48rem", margin: "0 auto", padding: "1.5rem" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            marginBottom: "1.5rem",
+          }}
+        >
+          <Brain size={24} />
+          <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>
+            AI Configuration
+          </h1>
+        </div>
+        <AppCard>
+          <h2
+            style={{
+              fontSize: "1.1rem",
+              fontWeight: 600,
+              marginBottom: "0.5rem",
+            }}
+          >
+            No company yet
+          </h2>
+          <p
+            style={{
+              color: "var(--color-gray-600)",
+              marginBottom: "1rem",
+            }}
+          >
+            AI settings are scoped to a company. Finish company setup first,
+            then come back here to configure AI providers.
+          </p>
+          <AppButton
+            size="sm"
+            onClick={() => {
+              window.location.href = "/onboarding";
+            }}
+          >
+            Set up company
+          </AppButton>
+        </AppCard>
       </div>
     );
   }
