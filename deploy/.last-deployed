@@ -1,14 +1,16 @@
 {
-  "version": "0.4.0",
-  "commit_sha": "ab2aa1b3b6453eca98e2fac9056b2f7df6028d56",
-  "deployed_at": "2026-04-08T15:21:34Z",
+  "version": "0.4.1",
+  "commit_sha": "b862cb693dcd51c6b358bbbf457a19e4a1b9e546",
+  "deployed_at": "2026-04-09T03:10:00Z",
   "deployed_by": "jack@terrene.foundation",
   "environment": "production",
   "target": "arbor-prod (GCE asia-southeast1-b)",
   "domain": "arbor.terrene.foundation",
-  "backend_image": "terrenefoundation/arbor-backend:0.4.0",
-  "frontend_image": "terrenefoundation/arbor-frontend:0.4.0",
+  "backend_image": "terrenefoundation/arbor-backend:0.4.1",
+  "frontend_image": "terrenefoundation/arbor-frontend:0.4.1",
+  "backend_image_digest": "sha256:a02b6644e711f8dfd4482642c5765134885d3336c21c2f1d6cf568bda3e46c38",
+  "frontend_image_digest": "sha256:e40516397bab4a45a03a6e0bf365aa4a8123fc17bbfe8d181332fae1f3e43eb2",
   "health_verified_external": true,
   "health_endpoint": "https://arbor.terrene.foundation/api/health",
-  "notes": "Ollama BYOK provider end-to-end. C1 audit clean (0 BYOK configs historically, no rotation required). M4 kaizen-agents patch applied in-repo until kailash-py#361 ships upstream."
+  "notes": "Fix: AI settings page infinite loading for users without company_id. Frontend-only patch. Vitest regression test (3 cases) added. Caddy + postgres + redis containers untouched (still up 8 days)."
 }
