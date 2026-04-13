@@ -39,7 +39,8 @@ def read(model_name: str, record_id: int | str) -> dict[str, Any] | None:
     Returns None if the record is not found or has an error.
     """
     db = _get_db()
-    result = db.express_sync.read(model_name, str(record_id))
+    rid = int(record_id) if isinstance(record_id, str) and record_id.isdigit() else record_id
+    result = db.express_sync.read(model_name, rid)
     if not result or result.get("error") or result.get("failed"):
         return None
     return result
@@ -67,13 +68,15 @@ def update(
 ) -> dict[str, Any]:
     """Update a single record by ID via db.express_sync."""
     db = _get_db()
-    return db.express_sync.update(model_name, str(record_id), updates)
+    rid = int(record_id) if isinstance(record_id, str) and record_id.isdigit() else record_id
+    return db.express_sync.update(model_name, rid, updates)
 
 
 def delete(model_name: str, record_id: int | str) -> dict[str, Any] | bool:
     """Delete a single record by ID via db.express_sync."""
     db = _get_db()
-    return db.express_sync.delete(model_name, str(record_id))
+    rid = int(record_id) if isinstance(record_id, str) and record_id.isdigit() else record_id
+    return db.express_sync.delete(model_name, rid)
 
 
 def count(model_name: str, filter_dict: dict[str, Any] | None = None) -> int:

@@ -352,7 +352,7 @@ export default function AIConfigPage() {
           <AppButton
             size="sm"
             onClick={() => {
-              window.location.href = "/onboarding";
+              window.location.href = "/profile";
             }}
           >
             Set up company
