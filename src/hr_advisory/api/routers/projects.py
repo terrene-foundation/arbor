@@ -35,7 +35,8 @@ def _validate_text_length(value: str, field_name: str, max_len: int = MAX_TEXT_L
 
 def _get_employee_for_user(user_id: int, company_id: int) -> dict | None:
     """Resolve the Employee record for a given user_id + company_id."""
-    records = dataflow_crud.list_records("Employee",
+    records = dataflow_crud.list_records(
+        "Employee",
         {"user_id": user_id, "company_id": company_id},
         limit=1,
     )
@@ -94,7 +95,8 @@ async def create_project(
     if not math.isfinite(budget_amount):
         raise HTTPException(status_code=400, detail="Invalid numeric value.")
 
-    project = dataflow_crud.create("Project",
+    project = dataflow_crud.create(
+        "Project",
         {
             "company_id": company_id,
             "name": name,
@@ -185,7 +187,8 @@ async def list_assignments(
         raise HTTPException(status_code=400, detail="No company associated.")
 
     _verify_project_ownership(project_id, company_id)
-    assignments = dataflow_crud.list_records("ProjectAssignment",
+    assignments = dataflow_crud.list_records(
+        "ProjectAssignment",
         {"project_id": project_id},
     )
     return {"assignments": assignments, "count": len(assignments)}
@@ -221,7 +224,8 @@ async def assign_employees(
         hourly_rate = float(item.get("hourly_rate", 0.0))
         if not math.isfinite(hourly_rate):
             raise HTTPException(status_code=400, detail="Invalid numeric value.")
-        assignment = dataflow_crud.create("ProjectAssignment",
+        assignment = dataflow_crud.create(
+            "ProjectAssignment",
             {
                 "project_id": project_id,
                 "employee_id": employee_id,
@@ -291,7 +295,8 @@ async def create_project_role(
     if not name:
         raise HTTPException(status_code=400, detail="Role name is required.")
 
-    role = dataflow_crud.create("ProjectRole",
+    role = dataflow_crud.create(
+        "ProjectRole",
         {
             "company_id": company_id,
             "name": name,
@@ -366,7 +371,8 @@ async def add_overhead(
     if not name:
         raise HTTPException(status_code=400, detail="Overhead name is required.")
 
-    overhead = dataflow_crud.create("ProjectOverhead",
+    overhead = dataflow_crud.create(
+        "ProjectOverhead",
         {
             "project_id": project_id,
             "name": name,
@@ -474,7 +480,8 @@ async def create_timesheet_entry(
     if not employee_id:
         raise HTTPException(status_code=400, detail="employee_id is required.")
 
-    entry = dataflow_crud.create("TimesheetEntry",
+    entry = dataflow_crud.create(
+        "TimesheetEntry",
         {
             "project_id": project_id,
             "employee_id": employee_id,
@@ -594,6 +601,92 @@ async def delete_timesheet_entry(
     return {"detail": "Entry deleted."}
 
 
+@router.post("/timesheets/entries/{entry_id}/submit")
+async def submit_timesheet_entry(
+    entry_id: int,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Submit a timesheet entry for approval."""
+    company_id = get_current_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated.")
+
+    existing = dataflow_crud.read("TimesheetEntry", entry_id)
+    if not existing or existing.get("company_id") != company_id:
+        raise HTTPException(status_code=404, detail="Entry not found.")
+
+    result = dataflow_crud.update(
+        "TimesheetEntry",
+        entry_id,
+        {
+            "status": "submitted",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return {"entry": result, "message": "Timesheet submitted for approval."}
+
+
+@router.post("/timesheets/entries/{entry_id}/approve")
+async def approve_timesheet_entry(
+    entry_id: int,
+    current_user: dict = Depends(require_role("owner", "hr_manager")),
+) -> dict:
+    """Approve a submitted timesheet entry."""
+    company_id = get_current_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated.")
+
+    existing = dataflow_crud.read("TimesheetEntry", entry_id)
+    if not existing or existing.get("company_id") != company_id:
+        raise HTTPException(status_code=404, detail="Entry not found.")
+
+    if existing.get("status") != "submitted":
+        raise HTTPException(status_code=400, detail="Only submitted entries can be approved.")
+
+    result = dataflow_crud.update(
+        "TimesheetEntry",
+        entry_id,
+        {
+            "status": "approved",
+            "approved_by": int(current_user.get("sub", 0)),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return {"entry": result, "message": "Timesheet approved."}
+
+
+@router.post("/timesheets/entries/{entry_id}/reject")
+async def reject_timesheet_entry(
+    entry_id: int,
+    request: Request,
+    current_user: dict = Depends(require_role("owner", "hr_manager")),
+) -> dict:
+    """Reject a submitted timesheet entry."""
+    company_id = get_current_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated.")
+
+    existing = dataflow_crud.read("TimesheetEntry", entry_id)
+    if not existing or existing.get("company_id") != company_id:
+        raise HTTPException(status_code=404, detail="Entry not found.")
+
+    if existing.get("status") != "submitted":
+        raise HTTPException(status_code=400, detail="Only submitted entries can be rejected.")
+
+    body = await request.json()
+    result = dataflow_crud.update(
+        "TimesheetEntry",
+        entry_id,
+        {
+            "status": "rejected",
+            "rejection_reason": body.get("reason", ""),
+            "approved_by": int(current_user.get("sub", 0)),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return {"entry": result, "message": "Timesheet rejected."}
+
+
 # --------------------------------------------------------------------------
 # Allocations
 # --------------------------------------------------------------------------
@@ -640,7 +733,8 @@ async def create_allocation(
 
     _verify_project_ownership(project_id, company_id)
 
-    allocation = dataflow_crud.create("ProjectAllocation",
+    allocation = dataflow_crud.create(
+        "ProjectAllocation",
         {
             "company_id": company_id,
             "project_id": project_id,

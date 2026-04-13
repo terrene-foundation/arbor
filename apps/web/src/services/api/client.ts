@@ -159,8 +159,17 @@ export function unwrapNexusResponse(body: any): any {
 
 async function parseErrorBody(response: Response): Promise<string> {
   try {
-    const body = (await response.json()) as { detail?: string };
-    if (body.detail) return body.detail;
+    const body = (await response.json()) as {
+      detail?: string | Array<{ msg?: string }>;
+    };
+    if (body.detail) {
+      if (typeof body.detail === "string") return body.detail;
+      // FastAPI 422 returns detail as array of validation errors
+      if (Array.isArray(body.detail)) {
+        return body.detail.map((e) => e.msg ?? String(e)).join("; ");
+      }
+      return String(body.detail);
+    }
   } catch {
     /* response body may not be JSON */
   }

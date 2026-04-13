@@ -169,4 +169,15 @@ export const leaveApi = {
       params,
     );
   },
+
+  /** List leave policies (admin). */
+  listPolicies(): Promise<{
+    policies: Record<string, unknown>[];
+    count: number;
+  }> {
+    return apiClient.get<{
+      policies: Record<string, unknown>[];
+      count: number;
+    }>("/leave/policies");
+  },
 };

@@ -231,38 +231,43 @@ export const integrationsApi = {
 
   /** Get health status for all connectors. */
   connectorHealth(): Promise<ConnectorHealthResponse> {
-    return apiClient.get<ConnectorHealthResponse>("/admin/connector-health");
+    return apiClient.get<ConnectorHealthResponse>("/integrations/health");
   },
 
   /** Get government filing submissions. */
   filingsList(): Promise<FilingListResponse> {
-    return apiClient.get<FilingListResponse>("/admin/submission-ledger");
+    return apiClient.get<FilingListResponse>("/integrations/submissions");
   },
 
   /** Get saga detail for a filing. */
   sagaDetail(filingId: string): Promise<SagaDetail> {
-    return apiClient.get<SagaDetail>(`/admin/sagas/${filingId}`);
+    return apiClient.get<SagaDetail>(`/integrations/sagas/${filingId}`);
   },
 
   /** Retry a failed filing. */
   retryFiling(filingId: string): Promise<{ message: string }> {
     return apiClient.post<{ message: string }>(
-      `/admin/sagas/${filingId}/retry`,
+      `/integrations/sagas/${filingId}/resume`,
     );
   },
 
-  /** Get accounting sync status for payroll runs. */
+  /** Get accounting sync status for payroll runs.
+   *  Note: returns empty when no accounting integration is connected. */
   accountingSyncStatus(): Promise<AccountingSyncResponse> {
-    return apiClient.get<AccountingSyncResponse>(
-      "/payroll/accounting-sync-status",
-    );
+    return apiClient
+      .get<AccountingSyncResponse>("/integrations/connections")
+      .then((resp) => resp as unknown as AccountingSyncResponse)
+      .catch(
+        () => ({ records: [], total: 0 }) as unknown as AccountingSyncResponse,
+      );
   },
 
   /** Trigger sync for a specific payroll run. */
   syncPayrollRun(runId: number): Promise<{ message: string }> {
-    return apiClient.post<{ message: string }>(
-      `/payroll/accounting-sync/${runId}`,
-    );
+    return apiClient.post<{ message: string }>(`/integrations/tools/call`, {
+      tool_name: "sync_payroll_run",
+      arguments: { run_id: runId },
+    });
   },
 
   /** Get notification preferences. */
