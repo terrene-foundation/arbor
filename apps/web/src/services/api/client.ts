@@ -198,13 +198,12 @@ class ApiClient {
   }
 
   private buildUrl(path: string, params?: Record<string, string>): string {
-    const url = new URL(`${API_BASE}${path}`);
+    let url = `${API_BASE}${path}`;
     if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        url.searchParams.set(key, value);
-      }
+      const searchParams = new URLSearchParams(params);
+      url += `?${searchParams.toString()}`;
     }
-    return url.toString();
+    return url;
   }
 
   /**
