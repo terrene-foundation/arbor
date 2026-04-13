@@ -499,6 +499,7 @@ async def create_timesheet_entry(
 async def list_timesheet_entries(
     project_id: int | None = Query(None),
     employee_id: int | None = Query(None),
+    status: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
@@ -517,6 +518,8 @@ async def list_timesheet_entries(
     filters: dict = {"company_id": company_id}  # Always include tenant isolation
     if project_id:
         filters["project_id"] = project_id
+    if status:
+        filters["status"] = status
     if employee_id and role in ("owner", "hr_manager"):
         filters["employee_id"] = employee_id
     elif role not in ("owner", "hr_manager"):
