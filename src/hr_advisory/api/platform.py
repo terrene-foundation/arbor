@@ -146,8 +146,6 @@ def _register_health(fast_api) -> None:
             if cm is not None and hasattr(cm, "test_connection"):
                 result = await asyncio.wait_for(cm.test_connection(), timeout=5.0)
                 db_ok = result.get("status") == "connected"
-            else:
-                db_ok = dataflow_db._check_database_connection()
         except Exception:
             pass
 

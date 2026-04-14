@@ -247,12 +247,15 @@ def check_rate_limit(user_id: str, max_requests: int = _MAX_REQUESTS_PER_WINDOW)
 
     Args:
         user_id: Unique identifier for the user.
-        max_requests: Maximum requests per window. Default 30 for general
-            endpoints. Use 5 for LLM-consuming endpoints (advisory, shadow
-            execute) to prevent GPU monopolization.
+        max_requests: Maximum requests per window (must be >= 1). Default 30
+            for general endpoints. Use 5 for LLM-consuming endpoints (advisory,
+            shadow execute) to prevent GPU monopolization.
 
     Returns True if the request should be ALLOWED, False if rate-limited.
     """
+    if max_requests < 1:
+        max_requests = 1
+
     now = datetime.now()
 
     # Evict oldest users if at capacity

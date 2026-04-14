@@ -60,11 +60,14 @@ router = APIRouter()
 
 # Dedicated thread pool for LLM inference calls — isolates from default executor
 # so DB, briefing, and other async ops don't queue behind slow LLM calls.
-_LLM_WORKERS = int(os.environ.get("LLM_EXECUTOR_WORKERS", "4"))
+_LLM_WORKERS = max(1, min(int(os.environ.get("LLM_EXECUTOR_WORKERS", "4")), 16))
 _LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_LLM_WORKERS,
     thread_name_prefix="arbor-llm",
 )
+import atexit as _atexit
+
+_atexit.register(_LLM_EXECUTOR.shutdown, wait=False)
 
 # Install Kaizen provider monkey-patch for BYOK support.
 # Safe to call multiple times (idempotent).
@@ -323,7 +326,7 @@ async def advisory_query(
         require_server_default=True,
     )
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     engine_result = await asyncio.wait_for(
         loop.run_in_executor(
             _LLM_EXECUTOR,
