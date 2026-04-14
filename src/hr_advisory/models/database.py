@@ -7,6 +7,7 @@ to define models or build workflows.
 import os
 from urllib.parse import quote_plus, unquote
 from dataflow import DataFlow, DataFlowConfig
+from dataflow.core.config import DatabaseConfig
 
 
 def _ensure_password_encoded(url: str) -> str:
@@ -65,5 +66,6 @@ db = DataFlow(
         database_url=_url,
         connect_timeout_secs=5,
         max_lifetime_secs=3600,
+        database=DatabaseConfig(database_url=_url, pool_timeout=10),
     ),
 )

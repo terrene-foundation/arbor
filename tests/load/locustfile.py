@@ -54,6 +54,9 @@ ADVISORY_QUERIES = [
     "What are the penalties for late CPF contribution payments?",
 ]
 
+# Scenario selection — controls user class weights for targeted tests
+SCENARIO = os.environ.get("LOCUST_SCENARIO", "baseline")
+
 SHADOW_PAGES = ["dashboard", "employees", "payroll", "leave", "compliance", "documents"]
 
 SHADOW_COMMANDS = [
@@ -281,6 +284,57 @@ class AdvisoryUser(HttpUser):
                 resp.success()
             else:
                 resp.failure(f"List conversations failed: {resp.status_code}")
+
+    @task(1)
+    @tag("advisory", "stream", "sse-durability")
+    def advisory_stream_durability(self) -> None:
+        """POST /advisory/stream — verify SSE completes without premature disconnect."""
+        self._token_mgr.refresh_if_stale()
+        query = random.choice(ADVISORY_QUERIES)
+
+        with self.client.post(
+            "/advisory/stream",
+            json={"query": query},
+            headers=self._token_mgr.headers,
+            timeout=180,
+            name="/advisory/stream (durability)",
+            catch_response=True,
+            stream=True,
+        ) as resp:
+            if resp.status_code == 200:
+                chunks_received = 0
+                last_chunk = b""
+                for chunk in resp.iter_content(chunk_size=512):
+                    chunks_received += 1
+                    last_chunk = chunk
+                if chunks_received > 1 and last_chunk:
+                    resp.success()
+                else:
+                    resp.failure(f"SSE incomplete: only {chunks_received} chunks")
+            elif resp.status_code == 429:
+                resp.success()
+            else:
+                resp.failure(f"SSE durability failed: {resp.status_code}")
+
+    @task(1)
+    @tag("advisory", "overflow")
+    def conversation_overflow(self) -> None:
+        """Rapidly create conversations to test LRU eviction (10K boundary)."""
+        self._token_mgr.refresh_if_stale()
+        for _ in range(5):
+            with self.client.post(
+                "/advisory/query",
+                json={"query": "test " + uuid.uuid4().hex[:8]},
+                headers=self._token_mgr.headers,
+                timeout=65,
+                name="/advisory/query (overflow)",
+                catch_response=True,
+            ) as resp:
+                if resp.status_code in (200, 429):
+                    resp.success()
+                else:
+                    resp.failure(f"Overflow test failed: {resp.status_code}")
+                    break
 
 
 # ── Shadow Agent User ─────────────────────────────────────
@@ -568,6 +622,29 @@ class AuthUser(HttpUser):
                 self._refresh_token = None
             else:
                 resp.failure(f"Logout failed: {resp.status_code}")
+
+
+# ── Scenario-based weight adjustment ─────────────────────
+
+if SCENARIO == "gpu_saturation":
+    # Advisory-only: ramp advisory users, disable others
+    AdvisoryUser.weight = 10
+    ShadowUser.weight = 0
+    CrudUser.weight = 0
+    AuthUser.weight = 0
+elif SCENARIO == "thread_exhaustion":
+    # 10 advisory + 10 CRUD — test thread pool isolation
+    AdvisoryUser.weight = 5
+    ShadowUser.weight = 0
+    CrudUser.weight = 5
+    AuthUser.weight = 0
+elif SCENARIO == "crud_only":
+    # Pure CRUD — baseline without LLM load
+    AdvisoryUser.weight = 0
+    ShadowUser.weight = 0
+    CrudUser.weight = 10
+    AuthUser.weight = 1
+# else: "baseline" — use default weights (3/2/4/1)
 
 
 # ── Event hooks for reporting ─────────────────────────────
