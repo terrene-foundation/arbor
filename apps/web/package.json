@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
+    "@kailash/prism-web": "file:../../../../../../../../tmp/kailash-prism-web-0.2.0.tgz",
     "@tanstack/react-query": "^5.90.21",
     "clsx": "^2.1.1",
     "i18next": "^25.8.18",
@@ -25,8 +26,7 @@
     "react-markdown": "^10.1.0",
     "rehype-sanitize": "^6.0.0",
     "sonner": "^2.0.7",
-    "zod": "^4.3.6",
-    "@kailash/prism-web": "file:/tmp/kailash-prism-web-0.1.0.tgz"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
