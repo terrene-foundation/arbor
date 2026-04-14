@@ -115,10 +115,10 @@ def test_M4_patch_handles_malformed_json_gracefully():
         },
     ]
 
-    # Should not raise; passes through as-is
+    # Should not raise; upstream 0.9.2+ defaults malformed JSON to empty dict
     converted = ollama_mod._convert_messages_for_ollama(messages)
     args = converted[0]["tool_calls"][0]["function"]["arguments"]
-    assert args == "not valid json {"
+    assert args == {} or args == "not valid json {"  # {} in 0.9.2+, passthrough in patched 0.7.x
 
 
 @pytest.mark.regression

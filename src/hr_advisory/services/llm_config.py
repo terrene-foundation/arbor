@@ -51,6 +51,7 @@ OLLAMA_TOOL_CAPABLE_FAMILIES: frozenset[str] = frozenset(
         "qwen2.5",
         "qwen3",
         "qwq",  # Qwen with Questions — reasoning model with tool use
+        "gemma4",  # Google Gemma 4 — tool calling supported
         "mistral-nemo",
         "firefunction-v2",
         "command-r",
