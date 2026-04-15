@@ -104,12 +104,23 @@ class LLMJudge:
 
     def __init__(self) -> None:
         settings = get_settings()
+        # Prefer OpenAI when configured; otherwise fall back to Ollama so the
+        # judge runs on the Arbor-default Ollama-first setup without a paid key.
         self._model = settings.openai_prod_model or settings.default_llm_model
         self._api_key = settings.openai_api_key
+        self._provider = "openai"
+        self._base_url: str | None = None
+        if not self._model or not self._api_key:
+            if settings.ollama_model and settings.ollama_base_url:
+                self._model = settings.ollama_model
+                self._api_key = None
+                self._provider = "ollama"
+                self._base_url = settings.ollama_base_url
         if not self._model:
             raise ValueError(
-                "LLM judge requires a model name. Set OPENAI_PROD_MODEL or "
-                "DEFAULT_LLM_MODEL in your .env file."
+                "LLM judge requires a model name. Set OPENAI_PROD_MODEL / "
+                "DEFAULT_LLM_MODEL, or OLLAMA_MODEL + OLLAMA_BASE_URL, in "
+                "your .env file."
             )
 
     def evaluate(
@@ -202,14 +213,31 @@ class LLMJudge:
         import asyncio
         from kaizen_agents.delegate import Delegate, TextDelta
 
-        delegate = Delegate(
-            model=self._model,
-            system_prompt=(
-                "You are an expert evaluator of HR advisory responses "
-                "for Singapore employment law. Respond only with valid JSON."
-            ),
-            max_turns=1,
+        system_prompt = (
+            "You are an expert evaluator of HR advisory responses "
+            "for Singapore employment law. Respond only with valid JSON."
         )
+        if self._provider == "ollama":
+            from kaizen_agents.delegate.adapters import get_adapter
+
+            adapter = get_adapter(
+                provider="ollama",
+                model=self._model,
+                api_key="not-needed",
+                base_url=self._base_url,
+            )
+            delegate = Delegate(
+                model=self._model,
+                system_prompt=system_prompt,
+                max_turns=1,
+                adapter=adapter,
+            )
+        else:
+            delegate = Delegate(
+                model=self._model,
+                system_prompt=system_prompt,
+                max_turns=1,
+            )
         text_parts: list[str] = []
 
         async def _run() -> None:
