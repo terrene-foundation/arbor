@@ -50,6 +50,14 @@ class TestConfigSettings:
         assert settings.jwt_expiry_minutes == 60
 
     def test_package_version(self):
+        import re
+
         from hr_advisory import __version__
 
-        assert __version__ == "0.1.0"
+        # Smoke test: the package exposes a non-empty semver string. We don't
+        # pin an exact version here — the test would otherwise need a bump on
+        # every release, which is churn for zero signal.
+        assert __version__, "__version__ must not be empty"
+        assert re.match(
+            r"^\d+\.\d+\.\d+", __version__
+        ), f"__version__ should start with MAJOR.MINOR.PATCH, got {__version__!r}"

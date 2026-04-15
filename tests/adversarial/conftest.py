@@ -22,6 +22,28 @@ from hr_advisory.quality.rubric import QualityRubric
 from hr_advisory.quality.automated_checks import AutomatedChecks
 
 
+def pytest_collection_modifyitems(config, items):
+    """Auto-mark every adversarial test as slow.
+
+    Adversarial scenarios all go through `run_delegate_sync`, which hits a
+    real LLM (Ollama by default in Arbor). Each query is typically >10 s
+    and the suite has dozens of scenarios, so the whole class belongs
+    behind the `-m "not slow"` gate that unit/regression/sdk tests use.
+    """
+    adversarial_root = Path(__file__).resolve().parent
+    slow_marker = pytest.mark.slow
+    for item in items:
+        try:
+            item_path = Path(str(item.fspath)).resolve()
+        except Exception:
+            continue
+        try:
+            item_path.relative_to(adversarial_root)
+        except ValueError:
+            continue  # not an adversarial test
+        item.add_marker(slow_marker)
+
+
 @pytest.fixture(scope="session")
 def quality_rubric():
     """Session-scoped QualityRubric instance (includes LLM judge)."""
