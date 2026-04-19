@@ -44,14 +44,15 @@ Reviews happen at COC phase boundaries, not per-edit. Skip only when explicitly 
 
 **Why:** Skipping gate reviews lets analysis gaps, security holes, and naming violations propagate to downstream repos where they are far more expensive to fix. Evidence: 0052-DISCOVERY §3.3 — six commits shipped without a single review because gates were phrased as "recommended." Upgrading to MUST + background agents makes reviews nearly free.
 
-| Gate                | After Phase  | Enforcement | Review                                                                         |
-| ------------------- | ------------ | ----------- | ------------------------------------------------------------------------------ |
-| Analysis complete   | `/analyze`   | RECOMMENDED | **reviewer**: Are findings complete? Gaps?                                     |
-| Plan approved       | `/todos`     | RECOMMENDED | **reviewer**: Does plan cover requirements?                                    |
-| Implementation done | `/implement` | **MUST**    | **reviewer** + **security-reviewer**: Run as parallel background agents.       |
-| Validation passed   | `/redteam`   | RECOMMENDED | **reviewer**: Are red team findings addressed?                                 |
-| Knowledge captured  | `/codify`    | RECOMMENDED | **gold-standards-validator**: Naming, licensing compliance.                    |
-| Before release      | `/release`   | **MUST**    | **reviewer** + **security-reviewer** + **gold-standards-validator**: Blocking. |
+| Gate                             | After Phase          | Enforcement | Review                                                                                                                                                                                                                                                                                         |
+| -------------------------------- | -------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Analysis complete                | `/analyze`           | RECOMMENDED | **reviewer**: Are findings complete? Gaps?                                                                                                                                                                                                                                                     |
+| Plan approved                    | `/todos`             | RECOMMENDED | **reviewer**: Does plan cover requirements?                                                                                                                                                                                                                                                    |
+| Implementation done              | `/implement`         | **MUST**    | **reviewer** + **security-reviewer**: Run as parallel background agents.                                                                                                                                                                                                                       |
+| Validation passed                | `/redteam`           | RECOMMENDED | **reviewer**: Are red team findings addressed?                                                                                                                                                                                                                                                 |
+| Knowledge captured               | `/codify`            | RECOMMENDED | **gold-standards-validator**: Naming, licensing compliance.                                                                                                                                                                                                                                    |
+| Before release                   | `/release`           | **MUST**    | **reviewer** + **security-reviewer** + **gold-standards-validator**: Blocking.                                                                                                                                                                                                                 |
+| After release (post-merge audit) | `/release` follow-up | RECOMMENDED | **reviewer** run against the MERGED release commit on main. Catches drift that pre-release review missed (e.g., a kwarg plumbing gap in a sibling call site, a keyspace bump with a missed invalidator). If CRIT/HIGH surfaces, open a patch branch in the SAME session and ship as `x.y.z+1`. |
 
 **BLOCKED responses when skipping MUST gates:**
 
@@ -68,6 +69,40 @@ Agent({subagent_type: "reviewer", run_in_background: true, prompt: "Review all c
 Agent({subagent_type: "security-reviewer", run_in_background: true, prompt: "Security audit all changes..."})
 # Parent continues; reviews arrive as notifications
 ```
+
+### MUST: Reviewer Prompts Include Mechanical AST/Grep Sweep, Not Only Diff Review
+
+Every gate-level reviewer prompt MUST include explicit mechanical sweeps that verify ABSOLUTE state (not only the diff). LLM-judgment review of the diff catches what's wrong with the new code; mechanical sweeps catch what's missing from the OLD code that the spec also touched.
+
+```
+# DO — reviewer prompt enumerates mechanical sweeps to run
+Agent(subagent_type="reviewer", prompt="""
+... diff context ...
+
+Mechanical sweeps (run BEFORE LLM judgment):
+1. Parity grep — every `return TrainingResult(...)` call site must pass `device=...`
+2. `pytest --collect-only -q` exit 0 across all test dirs
+3. `pip check` / `cargo check` — no new conflicts vs main
+4. For every public symbol in __all__ added by this PR — verify eager import
+   (per orphan-detection §6)
+""")
+
+# DO NOT — reviewer prompt only includes diff context
+Agent(subagent_type="reviewer", prompt="Review the diff between main and feat/X.")
+# ↑ reviewer reads the diff, judges the new code, never runs the sweep.
+#   Orphan in untouched lines stays invisible.
+```
+
+**BLOCKED rationalizations:**
+
+- "The reviewer is smart enough to spot orphans"
+- "Mechanical sweeps are /redteam's job, not the reviewer's"
+- "The diff IS the reviewer's scope"
+- "Adding sweeps to every reviewer prompt is repetitive"
+
+**Why:** Gate reviewers are constrained by the diff they're shown. The orphan failure mode of `rules/orphan-detection.md` §1 is invisible at diff-level — the new entries look complete; the OLD entries that were never updated for the new public surface stay invisible. A 4-second `grep -c` sweep catches what 5 minutes of LLM judgment misses. Without the sweep, the reviewer agent's APPROVE verdict is necessary but not sufficient. Evidence: Session 2026-04-19 — code reviewer APPROVED kailash-ml 0.12.0 with one minor finding; the subsequent `/redteam` mechanical sweep caught TorchTrainable + LightningTrainable missing `device=DeviceReport` (2 of 7 return sites). The reviewer never ran the parity grep.
+
+Origin: kailash-py session 2026-04-19 ML GPU-first Phase 1 codify cycle.
 
 ## Zero-Tolerance
 
@@ -90,6 +125,31 @@ Agent(prompt: "implement feature Y...")  # Blocks waiting for X's build lock
 ```
 
 **Why:** Cargo uses an exclusive filesystem lock on `target/`. Two cargo processes in the same directory serialize completely, turning parallel agents into sequential execution. Worktrees give each agent its own `target/` directory.
+
+**See `rules/worktree-isolation.md`** for the orchestrator pinning contract, the specialist self-check, and the post-agent file-existence verification. The `isolation: "worktree"` flag is necessary but not sufficient — without the verification layer, agents drift back to the main checkout silently.
+
+## MUST: Verify Agent Deliverables Exist After Exit
+
+When an agent reports completion of a file-writing task, the parent orchestrator MUST `ls` or `Read` the claimed file before trusting the completion claim. Agent "done" messages are NOT evidence of file creation — budget exhaustion mid-message truncates the final write, and the agent emits "Now let me write X..." with no tool call behind it.
+
+```python
+# DO — verify
+result = Agent(prompt="Write src/feature.py with ...")
+# parent's next step:
+Read("/abs/path/src/feature.py")  # raises if missing → retry
+
+# DO NOT — trust the completion message
+result = Agent(prompt="Write src/feature.py with ...")
+# parent moves on; src/feature.py never existed
+```
+
+**BLOCKED rationalizations:**
+
+- "The agent said 'done', that's good enough"
+- "Verifying every file slows the orchestrator"
+- "Now let me write the file…" (with no subsequent tool call)
+
+**Why:** Multi-agent sessions log occurrences where an agent hits its budget mid-message and reports success with zero files on disk. The `ls` check is O(1) and converts silent no-op into loud retry. See `rules/worktree-isolation.md` MUST Rule 3 for the full protocol.
 
 ## MUST NOT
 
