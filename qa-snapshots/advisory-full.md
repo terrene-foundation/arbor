@@ -1,0 +1,197 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation "Main navigation" [ref=e4]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: A
+        - generic [ref=e8]: Arbor
+      - generic [ref=e9]:
+        - list [ref=e10]:
+          - listitem [ref=e11]:
+            - link "Dashboard" [ref=e12] [cursor=pointer]:
+              - /url: /dashboard
+              - img [ref=e13]
+              - generic [ref=e18]: Dashboard
+          - listitem [ref=e19]:
+            - link "Advisory" [ref=e20] [cursor=pointer]:
+              - /url: /advisory
+              - img [ref=e21]
+              - generic [ref=e23]: Advisory
+          - listitem [ref=e24]:
+            - link "Compliance" [ref=e25] [cursor=pointer]:
+              - /url: /compliance
+              - img [ref=e26]
+              - generic [ref=e28]: Compliance
+        - paragraph [ref=e29]: Tools
+        - list [ref=e30]:
+          - listitem [ref=e31]:
+            - link "Calculators" [ref=e32] [cursor=pointer]:
+              - /url: /calculators
+              - img [ref=e33]
+              - generic [ref=e35]: Calculators
+          - listitem [ref=e36]:
+            - link "Documents" [ref=e37] [cursor=pointer]:
+              - /url: /documents
+              - img [ref=e38]
+              - generic [ref=e41]: Documents
+        - paragraph [ref=e42]: Management
+        - list [ref=e43]:
+          - listitem [ref=e44]:
+            - button "Payroll" [ref=e45]:
+              - img [ref=e46]
+              - generic [ref=e49]: Payroll
+              - img [ref=e50]
+          - listitem [ref=e52]:
+            - button "Leave" [ref=e53]:
+              - img [ref=e54]
+              - generic [ref=e56]: Leave
+              - img [ref=e57]
+          - listitem [ref=e59]:
+            - link "Claims" [ref=e60] [cursor=pointer]:
+              - /url: /claims
+              - img [ref=e61]
+              - generic [ref=e64]: Claims
+          - listitem [ref=e65]:
+            - link "Attendance" [ref=e66] [cursor=pointer]:
+              - /url: /attendance
+              - img [ref=e67]
+              - generic [ref=e70]: Attendance
+          - listitem [ref=e71]:
+            - link "Shifts" [ref=e72] [cursor=pointer]:
+              - /url: /shifts
+              - img [ref=e73]
+              - generic [ref=e77]: Shifts
+          - listitem [ref=e78]:
+            - button "Employees" [ref=e79]:
+              - img [ref=e80]
+              - generic [ref=e85]: Employees
+              - img [ref=e86]
+          - listitem [ref=e88]:
+            - link "Appraisals" [ref=e89] [cursor=pointer]:
+              - /url: /appraisals
+              - img [ref=e90]
+              - generic [ref=e93]: Appraisals
+          - listitem [ref=e94]:
+            - link "Projects" [ref=e95] [cursor=pointer]:
+              - /url: /projects
+              - img [ref=e96]
+              - generic [ref=e98]: Projects
+          - listitem [ref=e99]:
+            - link "Inventory" [ref=e100] [cursor=pointer]:
+              - /url: /inventory
+              - img [ref=e101]
+              - generic [ref=e105]: Inventory
+          - listitem [ref=e106]:
+            - link "Recruitment" [ref=e107] [cursor=pointer]:
+              - /url: /recruitment
+              - img [ref=e108]
+              - generic [ref=e111]: Recruitment
+          - listitem [ref=e112]:
+            - link "Approvals" [ref=e113] [cursor=pointer]:
+              - /url: /approvals
+              - img [ref=e114]
+              - generic [ref=e118]: Approvals
+          - listitem [ref=e119]:
+            - link "Reports" [ref=e120] [cursor=pointer]:
+              - /url: /reports
+              - img [ref=e121]
+              - generic [ref=e123]: Reports
+          - listitem [ref=e124]:
+            - link "Analytics" [ref=e125] [cursor=pointer]:
+              - /url: /analytics
+              - img [ref=e126]
+              - generic [ref=e128]: Analytics
+        - separator [ref=e129]
+        - list [ref=e130]:
+          - listitem [ref=e131]:
+            - link "Emergency" [ref=e132] [cursor=pointer]:
+              - /url: /emergency
+              - img [ref=e133]
+              - generic [ref=e135]: Emergency
+          - listitem [ref=e136]:
+            - link "Training" [ref=e137] [cursor=pointer]:
+              - /url: /training/skillsfuture
+              - img [ref=e138]
+              - generic [ref=e141]: Training
+          - listitem [ref=e142]:
+            - link "Integrations" [ref=e143] [cursor=pointer]:
+              - /url: /settings/integrations
+              - img [ref=e144]
+              - generic [ref=e146]: Integrations
+          - listitem [ref=e147]:
+            - link "Settings" [ref=e148] [cursor=pointer]:
+              - /url: /settings
+              - img [ref=e149]
+              - generic [ref=e152]: Settings
+          - listitem [ref=e153]:
+            - link "Help" [ref=e154] [cursor=pointer]:
+              - /url: /help
+              - img [ref=e155]
+              - generic [ref=e158]: Help
+      - button "Collapse sidebar" [ref=e160]:
+        - img [ref=e161]
+    - generic [ref=e163]:
+      - banner [ref=e164]:
+        - button "Open search" [ref=e167]:
+          - img [ref=e168]
+        - generic [ref=e171]:
+          - button "Notifications" [ref=e172]:
+            - img [ref=e173]
+          - button "User menu" [ref=e177]:
+            - generic [ref=e178]: J
+      - main [ref=e179]:
+        - generic [ref=e181]:
+          - generic [ref=e182]:
+            - generic [ref=e183]:
+              - heading "History" [level=2] [ref=e184]
+              - generic [ref=e185]:
+                - button "New conversation" [ref=e186]:
+                  - img [ref=e187]
+                - button "Collapse sidebar" [ref=e188]:
+                  - img [ref=e189]
+            - generic [ref=e192]:
+              - img [ref=e193]
+              - textbox "Search conversations..." [ref=e196]
+            - generic [ref=e198]: No conversations yet
+          - generic [ref=e200]:
+            - button "Terrene Foundation Limited technology" [ref=e239]:
+              - generic [ref=e240]:
+                - img [ref=e241]
+                - generic [ref=e245]: Terrene Foundation Limited
+                - generic [ref=e246]: technology
+              - img [ref=e247]
+            - generic [ref=e202]:
+              - generic [ref=e204]: 💬
+              - heading "Ask Arbor anything about Singapore HR" [level=2] [ref=e205]
+              - paragraph [ref=e206]: Get instant, cited guidance about employment law, CPF, foreign worker rules, leave entitlements, and more.
+            - generic [ref=e209]:
+              - generic [ref=e210]:
+                - textbox "Ask an HR question..." [ref=e211]
+                - button "Voice input" [ref=e212]:
+                  - img [ref=e213]
+                - button "Send message" [disabled] [ref=e216]:
+                  - img [ref=e217]
+              - generic [ref=e220]:
+                - button "What leave entitlements do my employees have?" [ref=e221]
+                - button "How do I calculate CPF contributions?" [ref=e222]
+                - button "Am I compliant with the Employment Act?" [ref=e223]
+                - button "What are the foreign worker quota limits for my sector?" [ref=e224]
+                - button "How do I handle a resignation properly?" [ref=e225]
+            - generic [ref=e227]:
+              - img [ref=e228]
+              - paragraph [ref=e230]: Arbor provides general guidance based on Singapore employment regulations. This is not legal advice. Always consult a qualified employment law practitioner for specific situations.
+        - generic [ref=e232]:
+          - generic [ref=e249]:
+            - button "Key Employment Terms (KET) not issued to employees" [ref=e250]:
+              - generic: Key Employment Terms (KET) not issued to employees
+            - button "No written employment contracts in place" [ref=e252]:
+              - generic: No written employment contracts in place
+            - button "No overtime records maintained" [ref=e254]:
+              - generic: No overtime records maintained
+            - button "No workplace safety and health policy in place" [ref=e256]:
+              - generic: No workplace safety and health policy in place
+            - button "No formal grievance handling process" [ref=e258]:
+              - generic: No formal grievance handling process
+          - button "Expand shadow margin" [ref=e234]:
+            - img [ref=e235]
+  - region "Notifications alt+T"
+  - alert [ref=e237]

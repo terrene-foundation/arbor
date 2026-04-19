@@ -1,0 +1,242 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e8]:
+    - navigation "Main navigation" [ref=e10]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: A
+        - generic [ref=e14]: Arbor
+      - generic [ref=e15]:
+        - list [ref=e16]:
+          - listitem [ref=e17]:
+            - link "Dashboard" [ref=e18] [cursor=pointer]:
+              - /url: /dashboard
+              - img [ref=e19]
+              - generic [ref=e24]: Dashboard
+          - listitem [ref=e25]:
+            - link "Advisory" [ref=e26] [cursor=pointer]:
+              - /url: /advisory
+              - img [ref=e27]
+              - generic [ref=e29]: Advisory
+          - listitem [ref=e30]:
+            - link "Compliance" [ref=e31] [cursor=pointer]:
+              - /url: /compliance
+              - img [ref=e32]
+              - generic [ref=e34]: Compliance
+        - paragraph [ref=e35]: Tools
+        - list [ref=e36]:
+          - listitem [ref=e37]:
+            - link "Calculators" [ref=e38] [cursor=pointer]:
+              - /url: /calculators
+              - img [ref=e39]
+              - generic [ref=e41]: Calculators
+          - listitem [ref=e42]:
+            - link "Documents" [ref=e43] [cursor=pointer]:
+              - /url: /documents
+              - img [ref=e44]
+              - generic [ref=e47]: Documents
+        - paragraph [ref=e48]: Management
+        - list [ref=e49]:
+          - listitem [ref=e50]:
+            - button "Payroll" [ref=e51]:
+              - img [ref=e52]
+              - generic [ref=e55]: Payroll
+              - img [ref=e56]
+            - list [ref=e58]:
+              - listitem [ref=e59]:
+                - link "Payroll Runs" [ref=e60] [cursor=pointer]:
+                  - /url: /payroll
+                  - img [ref=e61]
+                  - generic [ref=e64]: Payroll Runs
+              - listitem [ref=e65]:
+                - link "Reports" [ref=e66] [cursor=pointer]:
+                  - /url: /payroll/accounting-sync
+                  - img [ref=e67]
+                  - generic [ref=e70]: Reports
+              - listitem [ref=e71]:
+                - link "Gov Filings" [ref=e72] [cursor=pointer]:
+                  - /url: /payroll/filings
+                  - img [ref=e73]
+                  - generic [ref=e77]: Gov Filings
+          - listitem [ref=e78]:
+            - button "Leave" [ref=e79]:
+              - img [ref=e80]
+              - generic [ref=e82]: Leave
+              - img [ref=e83]
+          - listitem [ref=e85]:
+            - link "Claims" [ref=e86] [cursor=pointer]:
+              - /url: /claims
+              - img [ref=e87]
+              - generic [ref=e90]: Claims
+          - listitem [ref=e91]:
+            - link "Attendance" [ref=e92] [cursor=pointer]:
+              - /url: /attendance
+              - img [ref=e93]
+              - generic [ref=e96]: Attendance
+          - listitem [ref=e97]:
+            - link "Shifts" [ref=e98] [cursor=pointer]:
+              - /url: /shifts
+              - img [ref=e99]
+              - generic [ref=e103]: Shifts
+          - listitem [ref=e104]:
+            - button "Employees" [ref=e105]:
+              - img [ref=e106]
+              - generic [ref=e111]: Employees
+              - img [ref=e112]
+          - listitem [ref=e114]:
+            - link "Appraisals" [ref=e115] [cursor=pointer]:
+              - /url: /appraisals
+              - img [ref=e116]
+              - generic [ref=e119]: Appraisals
+          - listitem [ref=e120]:
+            - link "Projects" [ref=e121] [cursor=pointer]:
+              - /url: /projects
+              - img [ref=e122]
+              - generic [ref=e124]: Projects
+          - listitem [ref=e125]:
+            - link "Inventory" [ref=e126] [cursor=pointer]:
+              - /url: /inventory
+              - img [ref=e127]
+              - generic [ref=e131]: Inventory
+          - listitem [ref=e132]:
+            - link "Recruitment" [ref=e133] [cursor=pointer]:
+              - /url: /recruitment
+              - img [ref=e134]
+              - generic [ref=e137]: Recruitment
+          - listitem [ref=e138]:
+            - link "Approvals" [ref=e139] [cursor=pointer]:
+              - /url: /approvals
+              - img [ref=e140]
+              - generic [ref=e144]: Approvals
+          - listitem [ref=e145]:
+            - link "Reports" [ref=e146] [cursor=pointer]:
+              - /url: /reports
+              - img [ref=e147]
+              - generic [ref=e149]: Reports
+          - listitem [ref=e150]:
+            - link "Analytics" [ref=e151] [cursor=pointer]:
+              - /url: /analytics
+              - img [ref=e152]
+              - generic [ref=e154]: Analytics
+        - separator [ref=e155]
+        - list [ref=e156]:
+          - listitem [ref=e157]:
+            - link "Emergency" [ref=e158] [cursor=pointer]:
+              - /url: /emergency
+              - img [ref=e159]
+              - generic [ref=e161]: Emergency
+          - listitem [ref=e162]:
+            - link "Training" [ref=e163] [cursor=pointer]:
+              - /url: /training/skillsfuture
+              - img [ref=e164]
+              - generic [ref=e167]: Training
+          - listitem [ref=e168]:
+            - link "Integrations" [ref=e169] [cursor=pointer]:
+              - /url: /settings/integrations
+              - img [ref=e170]
+              - generic [ref=e172]: Integrations
+          - listitem [ref=e173]:
+            - link "Settings" [ref=e174] [cursor=pointer]:
+              - /url: /settings
+              - img [ref=e175]
+              - generic [ref=e178]: Settings
+          - listitem [ref=e179]:
+            - link "Help" [ref=e180] [cursor=pointer]:
+              - /url: /help
+              - img [ref=e181]
+              - generic [ref=e184]: Help
+      - button "Collapse sidebar" [ref=e186]:
+        - img [ref=e187]
+    - generic [ref=e189]:
+      - banner [ref=e190]:
+        - button "Open search" [ref=e193]:
+          - img [ref=e194]
+        - generic [ref=e197]:
+          - button "Notifications" [ref=e198]:
+            - img [ref=e199]
+          - button "User menu" [ref=e203]:
+            - generic [ref=e204]: J
+      - main [ref=e205]:
+        - generic [ref=e207]:
+          - generic [ref=e209]:
+            - img [ref=e210]
+            - generic [ref=e213]:
+              - heading "Payroll" [level=1] [ref=e214]
+              - paragraph [ref=e215]: Run payroll, review past runs, and manage payments
+          - generic [ref=e217]:
+            - generic [ref=e218]:
+              - img [ref=e219]
+              - generic [ref=e220]:
+                - heading "Run Payroll" [level=2] [ref=e221]
+                - paragraph [ref=e222]: Calculate payroll for a given month and review before approving
+            - generic [ref=e223]:
+              - generic [ref=e224]:
+                - generic [ref=e225]: Month
+                - combobox "Month" [ref=e226]:
+                  - option "January"
+                  - option "February"
+                  - option "March"
+                  - option "April" [selected]
+                  - option "May"
+                  - option "June"
+                  - option "July"
+                  - option "August"
+                  - option "September"
+                  - option "October"
+                  - option "November"
+                  - option "December"
+              - generic [ref=e227]:
+                - generic [ref=e228]: Year
+                - combobox "Year" [ref=e229]:
+                  - option "2024"
+                  - option "2025"
+                  - option "2026" [selected]
+                  - option "2027"
+                  - option "2028"
+              - generic [ref=e230]:
+                - generic [ref=e231]: Pay Date
+                - textbox "Pay Date" [ref=e232]: 2026-04-30
+              - button "Calculate Payroll" [ref=e233]:
+                - img [ref=e234]
+                - text: Calculate Payroll
+          - generic [ref=e236]:
+            - generic [ref=e238]:
+              - generic [ref=e239]:
+                - img [ref=e240]
+                - generic [ref=e242]: Last Payroll
+              - paragraph [ref=e243]: "-"
+            - generic [ref=e245]:
+              - generic [ref=e246]:
+                - img [ref=e247]
+                - generic [ref=e249]: Next Pay Date
+              - paragraph [ref=e250]: "-"
+            - generic [ref=e252]:
+              - generic [ref=e253]:
+                - img [ref=e254]
+                - generic [ref=e257]: CPF Due
+              - paragraph [ref=e258]: "-"
+          - generic [ref=e259]:
+            - heading "Payroll Runs" [level=2] [ref=e260]
+            - button "Refresh" [ref=e261]:
+              - img [ref=e262]
+              - text: Refresh
+          - generic [ref=e267]:
+            - img [ref=e269]
+            - heading "No payroll runs yet" [level=3] [ref=e272]
+            - paragraph [ref=e273]: Calculate your first payroll to get started.
+        - button "Ask Arbor (Ctrl+Shift+A)" [ref=e275] [cursor=pointer]:
+          - img [ref=e276]
+        - generic [ref=e280]:
+          - generic [ref=e282]:
+            - button "Key Employment Terms (KET) not issued to employees" [ref=e283]:
+              - generic: Key Employment Terms (KET) not issued to employees
+            - button "No written employment contracts in place" [ref=e285]:
+              - generic: No written employment contracts in place
+            - button "No overtime records maintained" [ref=e287]:
+              - generic: No overtime records maintained
+            - button "Updated CPF contribution rates for 2026" [ref=e289]:
+              - generic: Updated CPF contribution rates for 2026
+            - 'button "EA amendment: increased penalty for late salary payment" [ref=e291]':
+              - generic: "EA amendment: increased penalty for late salary payment"
+          - button "Expand shadow margin" [ref=e293]:
+            - img [ref=e294]
+  - region "Notifications alt+T"
+  - alert [ref=e7]

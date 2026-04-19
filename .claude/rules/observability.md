@@ -165,6 +165,159 @@ npm ls --all 2>&1 | grep -iE 'missing|warn|err'
 
 **Why:** Logs that no one reads are worse than no logs at all — they create the illusion of observability while letting the underlying problem fester. Without dedup, a 200-warning test run becomes 200 disposition lines and the agent rationally skips the gate; with dedup, it becomes 5–10 unique entries that are tractable.
 
+### 6. Mask Helper Output Forms
+
+Credential masking helpers MUST fail loudly and uniformly. A helper that bails on a malformed URL but returns a success-shaped string makes log triage believe the credential was masked when in fact it was written elsewhere.
+
+#### 6.1 Mask Failure Sentinels Distinct From Masked Output
+
+A masking helper that fails to parse its input MUST return a sentinel string distinguishable from any successful mask output. Returning the masked-success template (e.g. `"redis://***"`) on failure is BLOCKED.
+
+```python
+# DO — distinct sentinel
+def mask_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "<unparseable redis url>"  # grep-able failure marker
+    if not parsed.scheme or not parsed.hostname:
+        return "<unparseable redis url>"
+    return f"{parsed.scheme}://***@{parsed.hostname}:{parsed.port or ''}{parsed.path}"
+
+# DO NOT — success-shape on failure
+def mask_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "redis://***"  # looks masked; is actually "helper bailed"
+```
+
+**Why:** A mask helper that returns the success-shape on failure makes log triage believe the credential was masked when in fact the helper bailed and the credential may have been written to a sibling log line. Distinct sentinels surface the failure to grep.
+
+#### 6.2 Mask Form Uniform Across Helpers
+
+All URL-masking helpers in the codebase MUST emit the canonical `scheme://***@host[:port]/path` form. Variant forms (stripping userinfo entirely, masking only password) are BLOCKED.
+
+```python
+# DO — canonical form, grep-able via `***@`
+return f"redis://***@cache:6379/0"
+return f"postgresql://***@db.internal:5432/kailash"
+
+# DO NOT — userinfo stripped; audit cannot find it
+return "redis://cache:6379/0"             # looks like "no credentials" — is actually "stripped"
+return f"postgresql://user:***@db/kailash"  # partial mask leaks username
+```
+
+**Why:** A grep audit for credential leakage searches for `***@`. Helpers that strip userinfo silently bypass that audit. Uniform output form is what makes the masking layer auditable at all.
+
+### 7. Bulk Operations MUST Log Partial Failures at WARN
+
+Any bulk operation (BulkCreate, BulkUpdate, BulkDelete, BulkUpsert) that catches per-row exceptions MUST emit at least one WARN-level log line when `failed > 0`, including: operation name, total rows, failure count, and a sample error. Exception handlers in bulk ops MUST NOT use `except Exception: continue` or `except Exception: pass` without a WARN log.
+
+```python
+# DO — WARN on partial failure
+if failed_count > 0:
+    logger.warning(
+        "bulk_create.partial_failure",
+        attempted=total, failed=failed_count,
+        first_error=str(errors[0]) if errors else "unknown",
+    )
+
+# DO NOT — silent swallow (confirmed absent in kailash-py bulk_create.py:496-498)
+except Exception:
+    continue  # zero logging, zero signal
+```
+
+**Why:** Source audit confirmed: `BulkCreate._handle_batch_error()` has `except Exception: continue` with zero logging; `BulkUpsert` uses `print()` instead of a structured logger. A bulk op returning `failed: 10663` with no WARN line is invisible to alerting pipelines. See 0052-DISCOVERY §2.1 and `guides/deterministic-quality/06-observability-primitives.md` §2.
+
+**BLOCKED responses:**
+
+- "The caller will see the return value, no log needed"
+- "We return a failure list, that's enough"
+- "We already log at DEBUG"
+
+### 8. Schema-Revealing Field Names MUST Be Logged At DEBUG Or Hashed
+
+Structured log lines that emit schema-level identifiers (model names, column names, field names from classification/masking/validation code paths) MUST be logged at DEBUG level — not WARN or INFO. If an operational WARN is genuinely needed for the condition, emit a counter or a hash, not the raw field name.
+
+```python
+# DO — schema names at DEBUG only; operational signal via counter
+logger.debug(
+    "classification.default_applied",
+    extra={"model": model_name, "field": field_name, "default": default},
+)
+# Operators who need to audit unclassified fields enable DEBUG.
+metrics.classification_defaults.inc()  # operational signal without field name
+
+# DO — hash when WARN is required
+field_hash = hashlib.sha256(f"{model_name}.{field_name}".encode()).hexdigest()[:8]
+logger.warning(
+    "classification.default_applied",
+    extra={"field_hash": field_hash, "default": default},
+)
+
+# DO NOT — schema names at WARN bleed into log aggregators
+logger.warning(
+    "classification.default_applied",
+    extra={"model": "users", "field": "ssn", "default": "public"},
+)
+# ↑ any log aggregator with broader access than the database now knows
+# the schema has `users.ssn`, which is schema-level sensitive info
+```
+
+**BLOCKED responses:**
+
+- "The field name isn't the value, it's just the schema"
+- "Operators need to see which fields are unclassified"
+- "Log aggregator access is the same as database access"
+- "DEBUG is off in prod, nobody will see it"
+
+**Why:** Log aggregators (Datadog, Splunk, CloudWatch) are typically accessible to a broader audience than the production database — SREs, on-call engineers, support staff, third-party observability vendors. A WARN log containing `field=ssn` reveals the schema has an `ssn` column to everyone with log read permission, even if the VALUES never leak. Classification metadata is itself schema-level PII-adjacency. DEBUG-level field names stay out of alerting paths and routine dashboards; operators who need to audit unclassified fields enable DEBUG explicitly for the audit window.
+
+Origin: Red team review of PR #430 (2026-04-12) flagged `packages/kailash-dataflow/src/dataflow/classification/policy.py::ClassificationPolicy.classify` emitting field names at WARN. Downgraded to DEBUG in commit 62d64ac7.
+
+### 9. Never Pass Reserved Logger Attribute Names Via Structured-Field Kwargs
+
+Structured loggers reserve attribute names that the logging framework itself owns (the source module, the source filename, the level number, the thread name, etc.). Passing one of those names as a structured field kwarg raises a typed error in some configurations and silently overwrites the framework attribute in others — both fail modes corrupt log triage.
+
+Python `logging.LogRecord` reserves: `msg`, `args`, `module`, `exc_info`, `exc_text`, `stack_info`, `pathname`, `filename`, `name`, `levelname`, `levelno`, `lineno`, `funcName`, `created`, `msecs`, `relativeCreated`, `thread`, `threadName`, `processName`, `process`. Passing any via `extra={}` raises `KeyError: "Attempt to overwrite 'X' in LogRecord"` when mixed with certain logging configurations. Rust `tracing` has the same hazard for fields that collide with span metadata (`target`, `level`, `name`, `module_path`, `file`, `line`).
+
+```python
+# DO — domain-prefixed field name
+logger.info(
+    "estimator.loaded",
+    extra={"estimator_module": module_name, "estimator_class": class_name},
+)
+
+# DO NOT — collides with LogRecord.module
+logger.info(
+    "estimator.loaded",
+    extra={"module": module_name, "class": class_name},
+)
+# → KeyError: "Attempt to overwrite 'module' in LogRecord"
+# Non-deterministic: may pass when run in isolation, fail when mixed
+# with framework-configured logging (kaizen, structlog, etc.)
+```
+
+```rust
+// DO — domain-prefixed field name (Rust tracing)
+tracing::info!(estimator_module = %m, estimator_class = %c, "estimator.loaded");
+
+// DO NOT — collides with span's module_path
+tracing::info!(module = %m, "estimator.loaded");
+```
+
+**BLOCKED rationalizations:**
+
+- "It worked when I ran the test in isolation"
+- "The CI passes, so the collision doesn't matter here"
+- "Other modules use `module` as a field name too"
+- "The framework warning is non-fatal"
+
+**Why:** Non-deterministic test failures (passes when isolated, fails when mixed with framework-configured logging) are the worst class of test signal — they teach the operator that the test runner is unreliable, not that the code has a real bug. Domain prefixing (`estimator_module`, `query_module`, `agent_module`) is a one-token-cost permanent fix; the alternative is a recurring incident every time a new logging configuration ships.
+
+Origin: kailash-py PR #506 shipped this bug; caught by round-2 redteam; fixed in #509 hotfix (commit 717516f5). Cross-language equivalent applies to Rust `tracing` field collisions and any structured logger that reserves framework attributes.
+
 ## MUST NOT
 
 - **No log-and-continue on caught exceptions without action.** If you catch an exception, log it AND either retry, fall back, or re-raise. `logger.error(...); pass` is BLOCKED — same class as `except: pass` in `rules/zero-tolerance.md` Rule 3. **Exception:** hooks and cleanup paths where failure is expected — log at WARN and continue, same carve-out as `zero-tolerance.md` Rule 3.

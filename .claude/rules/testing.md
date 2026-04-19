@@ -87,6 +87,154 @@ def test_issue_42_user_creation_preserves_explicit_id():
     assert result["id"] == "custom-id-value"
 ```
 
+### MUST: Behavioral Regression Tests Over Source-Grep
+
+Regression tests MUST exercise the actual code path (call the function, assert the raise/return). Grepping source files for literal substrings is BLOCKED as the sole assertion.
+
+```python
+# DO — behavioral: call the function, assert the contract
+@pytest.mark.regression
+def test_null_byte_rejected_in_credential_decode():
+    """Regression: DATABASE_URL with null byte after percent-decode."""
+    from myapp.utils.url_credentials import decode_userinfo_or_raise
+    parsed = urlparse("mysql://user:%00bypass@host/db")
+    with pytest.raises(ValueError, match="null byte"):
+        decode_userinfo_or_raise(parsed)
+
+# DO NOT — source-grep: pins implementation, breaks on refactor
+@pytest.mark.regression
+def test_null_byte_check_exists():
+    src = open("src/myapp/db/connection.py").read()
+    assert "\\x00" in src  # breaks when logic moves to shared helper
+```
+
+**Why:** Source-grep tests pin the implementation, not the contract; refactoring to a shared helper (the right move) breaks them. Behavioral tests survive refactors and survive being moved between modules.
+
+### MUST: Verified Numerical Claims In Session Notes
+
+Any numerical claim about test counts, file counts, or coverage in session notes / wrapup MUST be produced by a verifying command (`pytest --collect-only -q | wc -l`, `git diff --stat`) at the moment of writing. Hand-typed numbers are BLOCKED.
+
+```bash
+# DO — verified: run the command, paste the output
+# "62 regression tests pass" — verified via:
+.venv/bin/python -m pytest tests/regression/ --collect-only -q 2>&1 | grep -c '::'
+# Output: 62
+
+# DO NOT — hand-recall: author guesses a round number
+# "86 regression tests pass" — author's recall; actual was 46.
+```
+
+**Why:** The "claim a number, never verify" pattern bypassed the audit-mode rule and produced a 40-test discrepancy. A verifying command costs 2 seconds and converts a memory bug into a script.
+
+## Test Resource Cleanup Discipline
+
+The unit test suite is a leading indicator of production hygiene. Warnings emitted during `pytest` are not "noise" — every `ResourceWarning`, `RuntimeWarning`, or `DeprecationWarning` is a real bug in either the test or the code-under-test that will surface as a production incident in a different shape.
+
+### MUST: Fixtures Yield + Cleanup, Never Return
+
+Any fixture that constructs a resource (channel, runtime, server, connection, pool) MUST use `yield` and call the resource's cleanup method after `yield`. `return` in a fixture that creates a stateful resource is BLOCKED.
+
+```python
+# DO — yield + cleanup, resource closed when test exits
+@pytest.fixture
+def cli_channel(channel_config, mock_input_stream, mock_output_stream):
+    channel = CLIChannel(
+        config=channel_config,
+        input_stream=mock_input_stream,
+        output_stream=mock_output_stream,
+    )
+    yield channel
+    channel.close()
+
+# DO NOT — return without cleanup, resource leaks until GC
+@pytest.fixture
+def cli_channel(channel_config, mock_input_stream, mock_output_stream):
+    return CLIChannel(
+        config=channel_config,
+        input_stream=mock_input_stream,
+        output_stream=mock_output_stream,
+    )
+```
+
+**BLOCKED rationalizations:**
+
+- "The class has a `__del__` so the GC will clean it up"
+- "It's a unit test, the process exits anyway"
+- "The mock makes the resource fake, no real cleanup needed"
+
+**Why:** Resource classes that emit `ResourceWarning` from `__del__` flood the test runner with warnings that hide real signals. Fixtures using `return` accumulate orphan resources across the test session — 36 unclosed channels in a single comprehensive channel test file produced 36 warnings before this rule landed.
+
+### MUST: AsyncMock Replaced By Mock When side_effect Is `async def`
+
+When patching an awaitable function (e.g. `asyncio.open_connection`, `asyncio.wait_for`) with a side_effect that is itself an `async def`, MUST use `Mock(new_callable=Mock)` not the default `AsyncMock`. The `async def` side_effect already returns the coroutine — `AsyncMock` wraps it again and the inner wrapper is never awaited.
+
+```python
+# DO — Mock with async side_effect, no double-wrap
+async def fake_open(*args, **kwargs):
+    return (mock_reader, mock_writer)
+
+with patch("asyncio.open_connection", new_callable=Mock) as mock_oc:
+    mock_oc.side_effect = fake_open
+    # production code awaits mock_oc(...) → fake_open() → coroutine awaited
+    await production_code()
+
+# DO NOT — AsyncMock + async side_effect, leaks _execute_mock_call coroutine
+async def fake_open(*args, **kwargs):
+    return (mock_reader, mock_writer)
+
+with patch("asyncio.open_connection") as mock_oc:  # default = AsyncMock for awaitables
+    mock_oc.side_effect = fake_open
+    # AsyncMock._execute_mock_call wraps fake_open() into another coroutine that's never awaited
+    # → RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+```
+
+**Why:** `AsyncMock` introspects the patched target; if it's a coroutine function, every `__call__` creates an internal `_execute_mock_call` coroutine that wraps the side_effect. When the side_effect itself is `async def`, the wrapper coroutine is created but never awaited — the warning surfaces during garbage collection, hours after the test passed.
+
+### MUST: Test Helper Classes Without `__init__` Use Stub Naming
+
+Classes in test files that act as helper implementations (subclasses of production base classes) MUST NOT use the `Test` prefix. pytest collects every class matching `python_classes = Test*`, and a helper class with `__init__(self, **kwargs)` raises `PytestCollectionWarning: cannot collect test class because it has a __init__ constructor`.
+
+```python
+# DO — Stub naming bypasses pytest collection
+class ConditionalRuntimeStub(BaseRuntime, ConditionalExecutionMixin):
+    """Helper runtime for testing the mixin in isolation."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.executed_nodes = []
+
+# DO NOT — Test prefix triggers collection warning + skipped tests
+class TestConditionalRuntime(BaseRuntime, ConditionalExecutionMixin):
+    """Helper runtime — but pytest tries to collect it as a test class."""
+
+    def __init__(self, **kwargs):  # <-- triggers PytestCollectionWarning
+        super().__init__(**kwargs)
+```
+
+**Why:** A `Test*` class with `__init__` is silently dropped from collection AND pollutes the warning summary. The `Stub` / `Helper` / `Fake` suffix signals intent and stays out of pytest's collection path.
+
+### MUST: JWT Test Secrets ≥ 32 Bytes (RFC 7518 §3.2)
+
+JWT test fixtures using HS256 / HS384 / HS512 MUST use a secret of at least 32 bytes. Short test secrets trigger `InsecureKeyLengthWarning` from PyJWT and produce false-positive security signals in CI logs.
+
+```python
+# DO — 32-byte test secret per RFC 7518
+class TestJWTAuth:
+    JWT_TEST_SECRET = "test-secret-key-minimum-32-bytes!"
+
+    def test_create_token(self):
+        auth = JWTAuth(self.JWT_TEST_SECRET, algorithm="HS256")
+        # ...
+
+# DO NOT — short test secret
+def test_create_token():
+    auth = JWTAuth("secret_key", algorithm="HS256")  # 10 bytes → InsecureKeyLengthWarning
+```
+
+**Why:** Short HMAC keys reduce brute-force resistance and are the same code path as production. A test that ships with a 10-byte key teaches the next contributor that 10 bytes is acceptable.
+
+Origin: PR #466 (2026-04-14) — eliminated 63 unit test warnings across 10 categories. Each pattern above resolves a category that recurred until the rule was added.
+
 ## 3-Tier Testing
 
 ### Tier 1 (Unit): Mocking allowed, <1s per test
@@ -105,55 +253,6 @@ def test_issue_42_user_creation_preserves_explicit_id():
 
 **Why:** E2E tests are the last gate before users — any abstraction here means the test validates something other than what users actually experience.
 
-## Multi-Turn Protocol Testing (LLM / streaming / wire-level)
-
-For features that touch multi-turn LLM protocols, streaming responses, or cross-process wire formats (HTTP chunked encoding, SSE, NDJSON, gRPC streams), Tier-1 unit tests are **NOT sufficient**. The bug pattern:
-
-- Turn 1 sends a request, gets a response. Parsing works. Test passes.
-- Turn 2 sends a follow-up with history from turn 1. The serializer uses one format (e.g., OpenAI's stringified tool args); the downstream parser expects another (e.g., Ollama's object tool args). Turn 2 fails with HTTP 400.
-- Unit tests with mocks never simulate turn 2's round-trip faithfully, so they pass with 100% green while production is broken.
-
-**This happened in Arbor round 16:** kaizen-agents OllamaStreamAdapter passed 1165 unit tests while the entire Ollama tool-call path was broken on turn 2. The bug only surfaced when a real Ollama server rejected the stringified tool-call arguments in the follow-up request. Filed as kailash-py#361. See `journal/0016-DISCOVERY-kaizen-m4-bug-confirmed-live.md`.
-
-### MUST Rule: Live integration test before merging LLM-touching PRs
-
-For any PR that touches:
-
-- LLM adapter wire format (serialization of messages, tool_calls, usage)
-- Streaming event parsing (NDJSON, SSE, chunked responses)
-- Multi-turn conversation history (assistant tool_calls replayed in next request)
-- Cross-provider abstractions (OpenAI ↔ Ollama ↔ Anthropic ↔ Gemini)
-
-the PR MUST include at least one **live integration test** that sends a real multi-turn request through real infrastructure (local Ollama, real OpenAI API, or equivalent) — not just unit tests with mocked transports. The live test should fail on the buggy codebase and pass on the fix.
-
-**Why:** The wire format is the contract. A mocked transport that mirrors your own serializer tautologically passes whatever your serializer produces. Only a real endpoint can tell you whether the wire format is valid. For multi-turn specifically, only a full round-trip surfaces the serializer/parser mismatch on turn 2.
-
-### DO / DO NOT
-
-```python
-# DO — real Ollama round-trip, no mocking
-async def test_multi_turn_tool_call_via_real_ollama():
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    adapter = OllamaStreamAdapter(base_url="http://localhost:11434", default_model="qwen3:latest")
-    config = DelegateConfig(adapter=adapter, require_server_default=True)
-    result = run_delegate_sync("What does Section 12 of the Singapore Employment Act say?", config=config)
-    assert "search_kb" in result["tools_called"]  # turn 1 fired the tool
-    assert result["response_text"]  # turn 2 composed a real answer
-```
-
-```python
-# DO NOT — mocks the wire format and asserts a tautology
-def test_multi_turn_tool_call_mocked():
-    mock_response = MagicMock()
-    mock_response.message = {"tool_calls": [{"function": {"arguments": '{"q": "x"}'}}]}
-    # ... the test asserts that OUR serializer produces the format we already
-    # hardcoded in the mock. It cannot catch a real wire-format mismatch.
-```
-
-### Exception
-
-If the repo has no live infrastructure available (no local Ollama, no API key), document the constraint in the PR description AND open a follow-up issue to add the test once infrastructure is in place. Never ship the PR claiming test coverage for a wire-format change without a live test somewhere in the chain (CI, staging, or local).
-
 ```
 tests/
 ├── regression/     # Permanent bug reproduction
@@ -161,6 +260,51 @@ tests/
 ├── integration/    # Tier 2: Real infrastructure
 └── e2e/           # Tier 3: Real everything
 ```
+
+## Test-Skip Triage Decision Tree
+
+Every test that is skipped, xfailed, or deleted MUST be classified into exactly one of the three tiers below. Silent skips, unbounded `@pytest.mark.skip` (or `#[ignore]` in Rust), or empty test bodies pretending to be tests are BLOCKED.
+
+| Tier | When | Action |
+|---|---|---|
+| **ACCEPTABLE** | Missing dep / infra unavailable / platform constraint | Keep skip; reason MUST name the constraint (`@pytest.mark.skipif(not REDIS_AVAILABLE, reason="redis required")`) |
+| **BORDERLINE** | Real library limitation; documenting a known-failing edge case | Convert to `@pytest.mark.xfail(strict=False, reason="...")` — preserves test body, flips green when fixed upstream |
+| **BLOCKED** | "TODO", "needs refactoring", "flaky", "times out", empty body | DELETE the test (and any abandoned fixtures it owned); if the underlying bug matters, file an issue |
+
+```python
+# DO — ACCEPTABLE: infra-conditional skip
+@pytest.mark.skipif(
+    os.environ.get("POSTGRES_TEST_URL") is None,
+    reason="requires POSTGRES_TEST_URL env var",
+)
+def test_real_postgres_round_trip(): ...
+
+# DO — BORDERLINE: convert to xfail with full reason
+@pytest.mark.xfail(
+    strict=False,
+    reason="PG ON CONFLICT does not support multi-column DO UPDATE on partial index",
+)
+def test_partial_index_upsert_conflict(): ...
+
+# DO NOT — BLOCKED: TODO-style silent skip
+@pytest.mark.skip(reason="TODO")
+def test_something(): ...
+
+# DO NOT — BLOCKED: empty body pretending to be a test
+def test_migration_works():
+    pass  # implementation pending
+```
+
+**BLOCKED rationalizations:**
+
+- "It's only one skipped test"
+- "I'll fix the test when I have time"
+- "The test was passing before but now flakes — let me skip it for now"
+- "TODO comments in the skip reason are documentation"
+
+**Why:** Silent skips and empty test bodies inflate the green-test count without exercising any code. The next session reads "5950 tests pass" and concludes the suite is healthy when the actually-tested surface has shrunk. Deletion is the only honest disposition for a test that does not run; xfail is the only honest disposition for a test that documents a real limitation. See `skills/test-skip-discipline/SKILL.md` for the full triage protocol.
+
+Origin: kailash-py gh #512 / PR #518 (2026-04-19) — applied this triage to convert 1 test to xfail (real PG ON CONFLICT limitation), delete 2 TODO-style tests, and delete 6 abandoned test files (`test_migration_path_tester`, `test_model_registry`, `test_edge_dataflow_unit`, `test_dataflow_bug_011_012_unit`, `test_migration_trigger_system`, `test_dataflow_postgresql_parameter_conversion`).
 
 ## Coverage Requirements
 
@@ -202,6 +346,64 @@ def test_workflow_execution():
     results, run_id = runtime.execute(workflow.build())
     assert results is not None
 ```
+
+## Delegating Primitives Need Direct Coverage
+
+When a module exposes paired variants that delegate to a shared core (e.g. `get` / `get_raw`, `post` / `post_raw`, `insert` / `insert_batch`, `read` / `read_typed`), each variant MUST have at least one test that calls it directly — not a test that calls only one variant and reaches the other by delegation.
+
+This is a narrow rule about delegating primitive pairs. It is NOT a universal "every public function has a direct test" mandate.
+
+### MUST: One Direct Test Per Variant In Every Delegating Pair
+
+```python
+# DO — one test per variant, each asserting the externally observable behaviour
+# of THAT specific variant
+def test_get_typed_success(client):
+    """Direct exercise of the typed get() variant."""
+    user = client.get("/users/42")
+    assert user["name"] == "Alice"
+
+def test_get_raw_success(client):
+    """Direct exercise of the raw get_raw() variant."""
+    resp = client.get_raw("/users/42")
+    assert resp["status"] == 200
+    assert "Alice" in resp["body"]
+
+# DO NOT — exercise only the typed variant and trust delegation
+def test_get_works(client):
+    """Only calls client.get(); never touches client.get_raw()."""
+    user = client.get("/users/42")
+    assert user["name"] == "Alice"
+# A refactor that touches get_raw's error mapping ships a silent regression
+# because no test exercises that path directly.
+```
+
+**Why:** A refactor that changes the typed variant while leaving the raw variant in place ships a silent regression — the raw variant has no guard. Convergent delegation paths look like one path until they diverge under refactor pressure, and the divergent moment is exactly when the test you didn't write would have failed.
+
+**BLOCKED rationalizations:**
+
+- "The typed variant calls the raw variant internally, so testing typed covers raw"
+- "Both variants share the same execute() core, so one test is enough"
+- "We can rely on integration tests to catch this"
+- "The raw variant is just a less-useful version of the typed one"
+
+### MUST: Mechanical Enforcement Via Grep
+
+`/redteam` MUST run a grep for paired variants and report any pair where one side has no direct call site in `tests/`. The check is mechanical — no judgment required.
+
+```bash
+# DO — grep each known variant pair for direct test coverage
+for variant in get_raw post_raw put_raw delete_raw; do
+  count=$(grep -rln "client.$variant\(" tests/ | wc -l)
+  if [ "$count" -eq 0 ]; then
+    echo "MISSING: no test calls client.$variant() directly"
+  fi
+done
+```
+
+**Why:** Mechanical grep catches the regression at the audit gate, not at the next production incident. Manual "I'm pretty sure I covered both variants" is not auditable.
+
+Origin: BP-046 (kailash-rs ServiceClient, 2026-04-14, commit `d3a14a73`). The `put_raw` and `delete_raw` variants were transitively exercised through delegation only — no direct call sites in the test suite. Fixed by adding four direct wiremock tests, one per raw variant. The pattern generalises to any module with paired typed/raw, single/batch, or sync/async variants that delegate to a shared core.
 
 ## Rules
 
