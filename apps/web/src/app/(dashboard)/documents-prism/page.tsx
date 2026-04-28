@@ -199,18 +199,18 @@ const resultCountStyle: CSSProperties = {
 
 /* ── Row actions (shared by table + card-grid modes) ───── */
 
-const rowActions: readonly DataTableRowAction<DocumentTemplateRow>[] = [
+const rowActions: readonly DataTableRowAction<DocumentTemplateRow, number>[] = [
   {
     id: "preview",
     label: "Preview",
     variant: "ghost",
-    href: (row) => `/documents/${String(row.id)}/preview`,
+    href: (_row, id) => `/documents/${id}/preview`,
   },
   {
     id: "generate",
     label: "Generate",
     variant: "primary",
-    href: (row) => `/documents/${String(row.id)}/generate`,
+    href: (_row, id) => `/documents/${id}/generate`,
   },
 ];
 
@@ -230,9 +230,9 @@ function makeDocumentsAdapter(
   templates: readonly DocumentTemplate[],
   category: string,
   search: string,
-): DataTableAdapter<DocumentTemplateRow> {
+): DataTableAdapter<DocumentTemplateRow, number> {
   return {
-    getRowId: (row) => String(row.id),
+    getRowId: (row) => row.id,
     capabilities: (): DataTableCapabilities => ({}),
     fetchPage: async (
       query: DataTableQuery,
@@ -601,7 +601,7 @@ function DocumentsPrismContent() {
           loading/error/empty states inside card-grid and table modes. The
           initial load error is passed through `error` so the banner shows
           even before the adapter runs. */}
-      <DataTable<DocumentTemplateRow>
+      <DataTable<DocumentTemplateRow, number>
         columns={columns}
         data={adapter}
         aria-label="Document templates"
@@ -617,10 +617,11 @@ function DocumentsPrismContent() {
         }}
         loading={loading}
         error={loadError}
-        onRowClick={(row) => {
+        onRowClick={(_row, id) => {
           // H3 wave-2 parity: row-body click navigates to preview. Card-grid
           // mode wires the same handler to Card.onActivate via DataTable.
-          router.push(`/documents/${String(row.id)}/preview`);
+          // 0.4.0 G-1: typed numeric `id` arrives directly — no String() coerce.
+          router.push(`/documents/${id}/preview`);
         }}
       />
     </VStack>

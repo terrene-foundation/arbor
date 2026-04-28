@@ -43,15 +43,15 @@ import { buildPayslipColumns } from "./elements/columns";
  * S1 wave-2 parity: the underlying `fetchPayslipsPage` keeps payslip_id
  * identifiers in dev-only DEBUG logs; the adapter adds no new logging.
  *
- * Note: TId is stringified at the adapter boundary because Prism 0.3.1's
- * `DataSource<T>` fixes TId to `string`. See wave-3 findings.
+ * 0.4.0 G-1: `TId = number` propagates through the DataTable callbacks so
+ * `getRowId` returns the typed numeric id directly — no `String(...)` coercion.
  */
 function makePayslipsAdapter(
-  downloadAction: DataTableRowAction<PayslipRow>,
+  downloadAction: DataTableRowAction<PayslipRow, number>,
   onTotalChange: (total: number) => void,
-): DataTableAdapter<PayslipRow> {
+): DataTableAdapter<PayslipRow, number> {
   return {
-    getRowId: (row) => String(row.id),
+    getRowId: (row) => row.id,
     capabilities: (): DataTableCapabilities => ({}),
     fetchPage: async (
       query: DataTableQuery,
@@ -99,7 +99,7 @@ function MyPayslipsPrismContent() {
   const [totalCount, setTotalCount] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
 
-  const downloadAction = useMemo<DataTableRowAction<PayslipRow>>(
+  const downloadAction = useMemo<DataTableRowAction<PayslipRow, number>>(
     () => ({
       id: "download",
       label: "Download",
@@ -157,7 +157,7 @@ function MyPayslipsPrismContent() {
         subtitle="Sortable, paginated payslip history — rendered by the Prism DataTable engine."
         headerActions={headerActions}
         content={
-          <DataTable<PayslipRow>
+          <DataTable<PayslipRow, number>
             columns={columns}
             data={adapter}
             aria-label="My payslips"
