@@ -11,8 +11,9 @@
  * Compare with /documents for the bespoke implementation.
  */
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   FileSignature,
   BookOpen,
@@ -463,61 +464,50 @@ function DocumentsPrismContent() {
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [search, setSearch] = useState<string>("");
 
-  // Page owns the raw template fetch (cached once), so adapter recreations on
-  // category/search change don't refetch the backend.
-  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  // React Query owns the fetch lifecycle — no consumer-managed loading /
+  // error / cancelled state. The adapter consumes the cached `templates`
+  // array; (activeCategory, search) changes recompose the adapter without
+  // hitting the backend.
+  const {
+    data: templates = [],
+    isLoading: loading,
+    error: queryError,
+  } = useQuery<DocumentTemplate[]>({
+    queryKey: ["document-templates"],
+    queryFn: fetchAllDocumentTemplates,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
-    fetchAllDocumentTemplates()
-      .then((data) => {
-        if (!cancelled) setTemplates(data);
-      })
-      .catch((err: unknown) => {
-        // S2 wave-2 parity: sanitize before showing to user.
-        if (!cancelled) setLoadError(sanitizeErrorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // S2 wave-2 parity: sanitize before showing to user.
+  const loadError = queryError ? sanitizeErrorMessage(queryError) : null;
 
   const categories = useMemo(() => deriveCategories(templates), [templates]);
 
-  // Reset category if the current one disappears from the data set.
-  useEffect(() => {
-    if (activeCategory === "All") return;
-    if (!categories.includes(activeCategory)) {
-      setActiveCategory("All");
-    }
-  }, [categories, activeCategory]);
+  // Reset to "All" if the current category disappears from the data. Derived
+  // during render — no effect, no transient setState cycle. setActiveCategory
+  // remains for user-driven chip clicks.
+  const effectiveCategory = categories.includes(activeCategory)
+    ? activeCategory
+    : "All";
 
-  // Recreate the adapter on (templates, activeCategory, search) change. The
-  // engine detects the new adapter identity and re-runs fetchPage, which in
-  // turn re-filters the already-cached templates array — no network refetch.
+  // Recreate the adapter on (templates, effectiveCategory, search) change.
+  // The engine detects the new adapter identity and re-runs fetchPage, which
+  // in turn re-filters the already-cached templates array — no network refetch.
   const adapter = useMemo(
-    () => makeDocumentsAdapter(templates, activeCategory, search),
-    [templates, activeCategory, search],
+    () => makeDocumentsAdapter(templates, effectiveCategory, search),
+    [templates, effectiveCategory, search],
   );
 
   // Total count of filtered rows — used in the result-count label above the
   // DataTable. Keeps parity with the bespoke page's "N templates in Category".
   const filteredCount = useMemo(
     () =>
-      applyClientFilters(templates, { category: activeCategory, search })
+      applyClientFilters(templates, { category: effectiveCategory, search })
         .totalCount,
-    [templates, activeCategory, search],
+    [templates, effectiveCategory, search],
   );
 
   const resultLabel = `${String(filteredCount)} template${filteredCount !== 1 ? "s" : ""}${
-    activeCategory !== "All" ? ` in ${activeCategory}` : ""
+    effectiveCategory !== "All" ? ` in ${effectiveCategory}` : ""
   }`;
 
   return (
@@ -567,7 +557,7 @@ function DocumentsPrismContent() {
       <div style={filterBarStyle}>
         <div style={chipRowStyle} role="tablist" aria-label="Category filter">
           {categories.map((cat) => {
-            const active = cat === activeCategory;
+            const active = cat === effectiveCategory;
             return (
               <button
                 key={cat}
