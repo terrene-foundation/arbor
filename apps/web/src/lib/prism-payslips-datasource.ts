@@ -6,17 +6,10 @@
  * Two surfaces:
  *  1. `fetchPayslipsPage()` — a simple consumer-owned fetch that returns the full
  *     payslip list (arbor's backend does not paginate `/payroll/my-payslips`).
- *     The Prism DataTable engine will then sort + paginate client-side via its
- *     useDataTable hook, because the engine currently only processes array data.
+ *     The Prism DataTable engine sorts + paginates client-side via its
+ *     useDataTable hook from the returned array.
  *
- *  2. `makePayslipsServerDataSource()` — returns a `ServerDataSource<PayslipRow>`
- *     implementation of `fetchData(params)`. This conforms to the Prism contract
- *     but is NOT invoked by the engine today — see BLOCKING finding #1 in
- *     `workspaces/fe-codegen-platform/04-validate/migration-m02-findings.md`.
- *     It is provided so the consumer code is ready for when M-04 wires
- *     ServerDataSource.fetchData into useDataTable.
- *
- *  3. `downloadPayslipPdf(id)` — implements the row action. Arbor's backend has
+ *  2. `downloadPayslipPdf(id)` — implements the row action. Arbor's backend has
  *     no PDF endpoint (the bespoke /my-payslips page ships a disabled Download
  *     button — see src/app/(dashboard)/my-payslips/page.tsx:277-290). The honest
  *     non-stub implementation is: fetch `myPayslipDetail(id)`, render it into a
@@ -39,11 +32,6 @@ import {
   type PayslipDetail,
   type PayslipItem,
 } from "@/services/api/payroll";
-import type {
-  ServerDataSource,
-  ServerFetchParams,
-  ServerFetchResult,
-} from "@kailash/prism-web";
 import type { UserFacingError } from "@/lib/prism-error-sanitize";
 
 /**
@@ -183,81 +171,7 @@ export async function fetchPayslipsPage(): Promise<PayslipsPageResult> {
   }
 }
 
-/* ── 2. ServerDataSource conformance (future use) ───────── */
-
-/**
- * Returns a `ServerDataSource<PayslipRow>` that conforms to Prism's contract.
- *
- * Current status: the Prism engine DOES NOT invoke `data.fetchData()` — see
- * BLOCKING finding #1. Passing this to `DataTable({ data: serverSource })`
- * results in an empty table. The page therefore uses `fetchPayslipsPage()`
- * directly and passes the resulting array to DataTable. This function is
- * retained so the consumer code is ready the moment the engine gains wiring.
- *
- * Note that arbor's backend does not support server-side pagination, sorting,
- * or filtering on `/payroll/my-payslips`. The implementation therefore fetches
- * the full list on every call and performs slice/sort locally. If the backend
- * later adds query-param support, this adapter is where those params are mapped.
- */
-export function makePayslipsServerDataSource(): ServerDataSource<PayslipRow> {
-  return {
-    async fetchData(
-      params: ServerFetchParams,
-    ): Promise<ServerFetchResult<PayslipRow>> {
-      const { page, pageSize, sort, filters, globalSearch } = params;
-      const page_result = await fetchPayslipsPage();
-      let rows = page_result.items;
-
-      // Global search — substring across all rendered fields
-      if (globalSearch.trim()) {
-        const q = globalSearch.toLowerCase();
-        rows = rows.filter((r) =>
-          [r.period_label, r.status]
-            .concat(String(r.gross_salary), String(r.net_salary))
-            .some((v) => v.toLowerCase().includes(q)),
-        );
-      }
-
-      // Column filters
-      for (const [field, value] of Object.entries(filters)) {
-        if (!value.trim()) continue;
-        const needle = value.toLowerCase();
-        rows = rows.filter((r) => {
-          const v = r[field];
-          return v != null && String(v).toLowerCase().includes(needle);
-        });
-      }
-
-      // Sort — single or multi
-      if (sort.length > 0) {
-        rows = [...rows].sort((a, b) => {
-          for (const s of sort) {
-            const av = a[s.field];
-            const bv = b[s.field];
-            if (av == null && bv == null) continue;
-            if (av == null) return s.direction === "asc" ? -1 : 1;
-            if (bv == null) return s.direction === "asc" ? 1 : -1;
-            if (typeof av === "number" && typeof bv === "number") {
-              const d = av - bv;
-              if (d !== 0) return s.direction === "asc" ? d : -d;
-              continue;
-            }
-            const cmp = String(av).localeCompare(String(bv));
-            if (cmp !== 0) return s.direction === "asc" ? cmp : -cmp;
-          }
-          return 0;
-        });
-      }
-
-      const totalCount = rows.length;
-      const start = page * pageSize;
-      const items = rows.slice(start, start + pageSize);
-      return { items, totalCount };
-    },
-  };
-}
-
-/* ── 3. Download action ──────────────────────────────────── */
+/* ── 2. Download action ──────────────────────────────────── */
 
 function escapeHtml(value: string): string {
   return value
