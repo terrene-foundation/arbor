@@ -15,7 +15,7 @@ Read `.claude/VERSION` → `type` field:
 
 - `coc-source` → Gate 1 + Gate 2 (below)
 - `coc-project` → Downstream Sync (next section)
-- `coc-use-template` / `coc-build` → **MUST verify** the repo is the actual template/BUILD repo before routing to loom. Check `basename $(pwd)` + `git remote get-url origin` (normalize SSH `git@host:owner/repo.git` → `owner/repo`) against known repos: `kailash-coc-claude-{py,rs,rb,prism}`, `kailash-{py,rs,prism}`. If match → "receives artifacts from loom/, run `/sync` at loom/". If no match → treat as `coc-project` and auto-correct VERSION in-place (type → `coc-project`, upstream → `{template, template_repo, template_version, synced_at, sdk_packages}` per `scripts/hooks/lib/version-utils.js::correctTemplateDerivedVersion`), then Downstream Sync.
+- `coc-use-template` / `coc-build` → **MUST verify** the repo is the actual template/BUILD repo before routing to loom. Check `basename $(pwd)` + `git remote get-url origin` (normalize SSH `git@host:owner/repo.git` → `owner/repo`) against known repos: `kailash-coc-claude-{py,rs,rb,prism}`, `kailash-{py,rs,prism}`. If match → "receives artifacts from loom/, run `/sync` at loom/". If no match → treat as `coc-project` and auto-correct VERSION in-place (type → `coc-project`, upstream → `{template, template_repo, template_version, synced_at, sdk_packages}` per `.claude/hooks/lib/version-utils.js::correctTemplateDerivedVersion`), then Downstream Sync.
 - Missing → ask user what type this repo is
 
 ## Downstream Sync (coc-project repos)
@@ -24,24 +24,51 @@ Pull latest artifacts from the USE template repo. No target needed — reads tem
 
 **Process**:
 
-1. **Resolve template**: If `scripts/resolve-template.js` exists, run `node scripts/resolve-template.js`. Otherwise resolve manually:
-   - Read `upstream.template` and `upstream.template_repo` from `.claude/VERSION`
-   - Check local sibling: `../<template>/` or `~/repos/loom/<template>/`
-   - Check cache: `~/.cache/kailash-coc/<template>/`
-   - If not found: `git clone --depth 1 --single-branch --branch main https://github.com/<template_repo>.git ~/.cache/kailash-coc/<template>/`
-   - Known slugs: `kailash-coc-claude-py` → `terrene-foundation/kailash-coc-claude-py`, same for `-rs`, `-rb`, `-prism`
-2. **Diff** template's `.claude/` + `scripts/` against local
-3. **Additive merge** (same semantics as Gate 2 step 4):
+1. **Resolve template** (canonical resolver, v2.9.1+):
+   `node "$RESOLVED_TEMPLATE_PATH/.claude/bin/resolve-template.js"` if a previous
+   sync already exists locally, OR for first-time sync:
+   `node "$(npm root -g 2>/dev/null)/.../bin/resolve-template.js"` is unavailable —
+   instead, replicate the resolver inline. Resolution order:
+   - **Step 1** — `KAILASH_COC_TEMPLATE_PATH` env var. If set and contains `.claude/`, use it. Source: `env-override`.
+   - **Step 2** — Cache at `~/.cache/kailash-coc/<template>/`. Auto-update via `git -C <cache> fetch --depth 1 origin main && git -C <cache> reset --hard origin/main`. Source: `cache`.
+   - **Step 3** — If no cache: `git clone --depth 1 --single-branch --branch main https://github.com/<template_repo>.git ~/.cache/kailash-coc/<template>/`. Source: `cloned`.
+   - **Step 4 (offline fallback only)** — Local sibling at `../<template>/` or `~/repos/loom/<template>/`. Used ONLY when steps 2-3 all fail (network unreachable). Source: `sibling-offline-fallback`. Emit a `freshness NOT guaranteed` notice.
+   - If a local sibling is detected during online resolution but NOT used, emit one stderr notice telling the user to set `KAILASH_COC_TEMPLATE_PATH` if they meant to use it.
+   - Known slugs: `kailash-coc-claude-{py,rs,rb,prism}` and the new multi-CLI `kailash-coc-{py,rs}` all live under `terrene-foundation/`.
+   - **NEVER use the legacy `scripts/resolve-template.js` shim** — it was added to the manifest's `obsoleted:` list in v2.9.1 and is purged in step 3 below.
+2. **Read obsoleted list from the resolved template**: `cat "$RESOLVED_TEMPLATE_PATH/.claude/.coc-obsoleted"` (slim purpose-built file; emitted by coc-sync Step 4.5). Each non-comment, non-blank line is a repo-relative path; trailing slash means directory. If the file is missing, the template predates v2.9.1 — log a one-line warning, skip step 3, and proceed; the obsoleted purge will happen on the NEXT sync once the template upgrades.
+3. **Purge obsoleted paths in this consumer (MUST, before any merge)**:
+   For each entry in the obsoleted list:
+   ```bash
+   for path in <obsoleted-paths>; do
+     if [ -e "./$path" ]; then
+       rm -rf "./$path"
+       echo "obsoleted: removed ./$path"
+     fi
+   done
+   ```
+   This is the ONLY mechanism by which downstream consumers purge stale orphan directories from former COC layouts. Skipping it leaves `require("./lib/...")` resolving against the wrong sibling and ships hooks that fail at every CC session start with `MODULE_NOT_FOUND`.
+4. **Diff** template's `.claude/` against local — MUST diff EVERY child directory under `.claude/`, NOT only the COC-tier directories. Specifically the diff MUST include:
+   - `.claude/agents/**`, `.claude/commands/**`, `.claude/rules/**`, `.claude/skills/**`, `.claude/guides/**` (the codegen-content tiers)
+   - `.claude/hooks/**` — runtime enforcement scripts (canonical location since v2.9.1; required for SessionStart, PreToolUse, etc. to fire)
+   - `.claude/hooks/lib/**` — sibling helper modules (`workspace-utils.js`, etc.) loaded via `require("./lib/...")` from `hooks/*.js`
+   - `.claude/bin/**` — resolver + emitter binaries (`resolve-template.js`, `emit.mjs`); without these the resolver cannot run
+   - `.claude/.coc-obsoleted` — the obsoleted-purge contract file itself (read in step 2; updates land here)
+   - Top-level `scripts/migrate.py` and other items declared in the manifest's `variant_only:` block — these live OUTSIDE `.claude/` but are part of the syncable set
+   - **NOT** `scripts/hooks/` or `.claude/scripts/` — those are obsoleted (purged in step 3) and MUST NOT be re-emitted.
+   **BLOCKED rationalizations:** "hooks/ are not codegen artifacts so the diff skips them" / "the manifest tiers section doesn't list hooks/**, so hooks aren't in the syncable set" / "the consumer's settings.json hooks paths are normalized in step 7, so the scripts arriving on disk is a separate concern". The `.claude/hooks/` directory MUST physically exist on the consumer's disk for the normalized settings.json paths to resolve at runtime — hook-path normalization without hook-script delivery is a no-op that ships a broken session.
+5. **Additive merge** (same semantics as Gate 2 step 4):
    - Template files overwrite matching local files
-   - Local-only files preserved (never deleted)
+   - Local-only files preserved (never deleted) **except** paths matching the manifest's `obsoleted:` list (handled in step 3 above)
    - **NEVER overwritten** (downstream-owned): `CLAUDE.md`, `.claude/VERSION`, `.claude/settings.local.json`, `.env`, `.git/`, `.claude/.proposals/`, `.claude/learning/`
    - Other exclusions: see sync-flow guide § "What downstream NEVER gets"
-4. **Present merge plan** with per-file decisions before applying
-5. **Verify** hook paths in `settings.json` resolve on disk
-6. **Update `.claude/VERSION` in-place** (never replace the file — only update specific fields): `upstream.template_version` ← template VERSION's `version`, `upstream.template_repo` ← resolved GitHub slug, `upstream.synced_at` ← now, `upstream.sdk_packages` ← from template. MUST preserve `type: coc-project`, `upstream.template` (name), and all other fields.
-7. **Update SDK pins** in `pyproject.toml`/`Cargo.toml` from template VERSION's `upstream.sdk_packages`
-8. **Install**: `uv sync` (py) or `cargo check` (rs) — **MANDATORY**
-9. **Update `.claude/.coc-sync-marker`** with timestamp
+6. **Present merge plan** with per-file decisions before applying — include the obsoleted-path deletions from step 3 in the plan output so the user sees exactly what's being removed.
+7. **Normalize settings.json hook paths**: scan the consumer's `.claude/settings.json` for any `hooks[].command` entry containing `$CLAUDE_PROJECT_DIR/scripts/hooks/` and rewrite to `$CLAUDE_PROJECT_DIR/.claude/hooks/`. Stale references would still fail with `MODULE_NOT_FOUND` after step 3 deleted the directory.
+8. **Verify** hook paths in `settings.json` resolve on disk under `.claude/hooks/` AND `grep -F 'scripts/hooks' .claude/settings.json` returns zero matches.
+9. **Update `.claude/VERSION` in-place** (never replace the file — only update specific fields): `upstream.template_version` ← template VERSION's `version`, `upstream.template_repo` ← resolved GitHub slug, `upstream.synced_at` ← now, `upstream.sdk_packages` ← from template. MUST preserve `type: coc-project`, `upstream.template` (name), and all other fields.
+10. **Update SDK pins** in `pyproject.toml`/`Cargo.toml` from template VERSION's `upstream.sdk_packages`
+11. **Install**: `uv sync` (py) or `cargo check` (rs) — **MANDATORY**
+12. **Update `.claude/.coc-sync-marker`** with timestamp + list of obsoleted paths purged in step 3 (audit trail for the migration)
 
 ## Two Gates (coc-source — loom/ only)
 
@@ -95,9 +122,16 @@ Merges loom/ source + variant overlays into USE template repos. This is a **merg
 1. **Read manifest** (`sync-manifest.yaml`) for tiers, variants, exclusions
 2. **Inventory the template** — read what's currently there before computing changes
 3. **Compute expected state** for the target (py or rs):
-   - Global files from `.claude/` (agents/, commands/, rules/, skills/, guides/)
-   - Variant overlay from `variants/{lang}/` — replacements and additions
-   - Scripts/ with same overlay logic
+   - Global codegen-content from `.claude/`: `agents/`, `commands/`, `rules/`, `skills/`, `guides/`
+   - **Global runtime infrastructure from `.claude/` (MUST include — easily missed):**
+     - `.claude/hooks/**` (canonical since v2.9.1) — every `*.js` plus the `lib/` sibling helpers
+     - `.claude/bin/**` — `resolve-template.js`, `emit.mjs`, and any other resolver/emitter binaries
+     - `.claude/.coc-obsoleted` — the obsoleted-purge contract file (regenerated by Step 4.5)
+   - Variant overlay from `variants/{lang}/` — replacements and additions, including any `variants/{lang}/hooks/*.js` declared in `variant_only:`
+   - Top-level non-`.claude/` files declared in `variant_only:` (e.g. `scripts/migrate.py`)
+   - **NOT** `scripts/hooks/` or `.claude/scripts/` — obsoleted in v2.9.1, MUST NOT be re-emitted to any target.
+
+   **BLOCKED rationalizations (Gate 2):** "the manifest tiers section enumerates the artifact set, hooks aren't in it" / "the multi-CLI emitter regenerates hooks via cli_variants, no need to copy" / "the consumer settings.json points at hooks/, that's enough" / "we'll fix the missing hooks on the next sync". Skipping `hooks/` or `bin/` ships a USE template whose downstream consumers have settings.json entries pointing at a non-existent directory; every CC session at the consumer fails SessionStart with `MODULE_NOT_FOUND`.
 4. **Per-file merge decisions**:
    - **UNCHANGED** → skip
    - **NEW** (in source, not in template) → add

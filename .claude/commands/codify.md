@@ -16,16 +16,6 @@ description: "Load phase 05 (codify) for the current workspace. Update existing 
 - Read `docs/` and `docs/00-authority/` for knowledge base
 - Output: update existing agents and skills in their canonical locations (e.g., `agents/frameworks/`, `skills/01-core-sdk/`, `skills/02-dataflow/`, etc.)
 
-## BUILD vs USE Repo Distinction (where does /codify write?)
-
-`/codify` writes to different locations depending on which repo it runs in. Before extracting knowledge, determine the repo type and follow the correct placement rule:
-
-- **BUILD repos** (kailash-py, kailash-rs, kailash-prism — source of truth for the SDKs): write to **canonical locations** (`agents/frameworks/`, `agents/analysis/`, `skills/01-core-sdk/`, `skills/02-dataflow/`, `rules/*.md`, etc.) AND append an entry to `.claude/.proposals/latest.yaml` so loom/ can pick the change up via Gate 1. BUILD repos MUST NOT write to `agents/project/` or `skills/project/` — those directories are a downstream-USE-only convention and should not exist in a BUILD repo.
-- **loom/** (COC authority): write to canonical locations and variant overlays (`.claude/agents/...`, `.claude/variants/{lang}/...`). loom/ has no `project/` subdirectories. Propose CC/CO-tier artifacts upstream to atelier/ as described in Step 7.
-- **Downstream USE repos** (consumer projects that `pip install kailash`, `gem install kailash`, etc.): write project-specific artifacts to `.claude/agents/project/<name>.md` and `.claude/skills/project/<name>/SKILL.md`. These stay **LOCAL** — no proposal file is created, no upstream flow. The `project/` directories are the preservation boundary on `/sync` (shared artifacts are overwritten by the template; `project/` is preserved).
-
-See `rules/artifact-flow.md` for the authority chain and `guides/co-setup/03-creating-components.md` for component placement.
-
 ## Execution Model
 
 This phase executes under the **autonomous execution model** (see `rules/autonomous-execution.md`). Knowledge extraction and codification are autonomous — agents extract, structure, and validate knowledge without human intervention. The human reviews the codified output at the end (structural gate on what becomes institutional knowledge), but the extraction and synthesis process is fully autonomous.
@@ -90,7 +80,7 @@ Using as many subagents as required, peruse `docs/`, especially `docs/00-authori
 
 Improve agents in their canonical locations.
 
-- Reference `.claude/agents/_subagent-guide.md` for agent format
+- Reference `rules/cc-artifacts.md` for agent format (desc <120 chars, body <400 lines, frontmatter + trigger phrases); see `agents/frameworks/ml-specialist.md` as an example
 - Identify which existing agent(s) should absorb the new knowledge
 - If no existing agent covers the domain, create a new agent in the appropriate directory
 
@@ -117,10 +107,6 @@ Follow the proposal protocol in `guides/co-setup/09-proposal-protocol.md`. Key r
 - **BUILD repos** (kailash-py, kailash-rs): Create/append proposal at `.claude/.proposals/latest.yaml` for loom/ review. **Append, never overwrite** unprocessed proposals. See `rules/artifact-flow.md`.
 - **loom/**: Propose CC/CO-tier artifacts upstream to atelier/ using the same append-not-overwrite protocol.
 - **Downstream project repos**: SKIP. Changes stay local.
-
-### 9. Release drift check (BUILD repos only)
-
-After codify, check `[RELEASE-DRIFT]` output from session-start OR run `node -e "const d=require('./scripts/hooks/lib/release-drift');console.log(d.detectUnreleasedPackages(process.cwd()))"`. If any packages have commits since their last release tag, recommend the user run `/release` before ending the session — codify commits add to the unreleased backlog and silent drift accumulates across sessions. Silent on downstream repos / non-package repos.
 
 ## Agent Teams
 
