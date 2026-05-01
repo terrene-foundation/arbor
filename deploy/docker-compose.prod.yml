@@ -3,6 +3,9 @@
 # Deploy:
 #   scp docker-compose.prod.yml Caddyfile .env arbor-prod:~/arbor/
 #   ssh arbor-prod "cd ~/arbor && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d"
+#
+# With Ollama (GPU required):
+#   docker compose -f docker-compose.prod.yml --profile gpu up -d
 
 services:
   caddy:
@@ -25,14 +28,15 @@ services:
   backend:
     image: terrenefoundation/arbor-backend:${ARBOR_VERSION:-latest}
     container_name: arbor-backend
+    stop_grace_period: 30s
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_PROD_MODEL=${OPENAI_PROD_MODEL:-gpt-5-mini-2025-08-07}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_PROD_MODEL=${OPENAI_PROD_MODEL:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-5-mini-2025-08-07}
+      - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-}
       - LLM_KEY_ENCRYPTION_KEY=${LLM_KEY_ENCRYPTION_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - APP_ENV=production
@@ -42,6 +46,18 @@ services:
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
       - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-https://arbor.terrene.foundation/api/auth/google/callback}
       - KAILASH_RUNTIME=async
+      - DATAFLOW_MAX_CONNECTIONS=${DATAFLOW_MAX_CONNECTIONS:-30}
+      - OLLAMA_HOST=${OLLAMA_HOST:-}
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
+      - LLM_EXECUTOR_WORKERS=${LLM_EXECUTOR_WORKERS:-4}
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2G"
+        reservations:
+          cpus: "0.5"
+          memory: "512M"
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,16 +99,45 @@ services:
     container_name: arbor-redis
     volumes:
       - arbor_redis:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: >
+      redis-server --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb --maxmemory-policy allkeys-lru
+      --appendonly yes --maxclients 100
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$REDIS_PASSWORD redis-cli ping"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: arbor-ollama
+    profiles: ["gpu"]
+    environment:
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-4}
+      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_KEEP_ALIVE=30m
+      - OLLAMA_MAX_QUEUE=8
+    volumes:
+      - arbor_ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
 volumes:
   arbor_pgdata:
   arbor_redis:
+  arbor_ollama:
   caddy_data:
   caddy_config:

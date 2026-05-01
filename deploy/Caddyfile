@@ -1,23 +1,28 @@
 arbor.terrene.foundation {
-	# API backend — proxy /api/* to FastAPI
-	handle /api/* {
+	# SSE streaming — needs extended timeouts (MUST come before generic /api/*)
+	handle /api/advisory/stream* {
 		uri strip_prefix /api
-		reverse_proxy backend:8000
-	}
-
-	# Health check passthrough
-	handle /health* {
-		reverse_proxy backend:8000
-	}
-
-	# SSE streaming — needs extended timeouts
-	handle /advisory/stream* {
 		reverse_proxy backend:8000 {
 			flush_interval -1
 			transport http {
 				read_timeout 300s
 			}
 		}
+	}
+
+	# API backend — proxy /api/* to FastAPI
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy backend:8000 {
+			health_uri /health
+			health_interval 10s
+			health_timeout 5s
+		}
+	}
+
+	# Health check passthrough
+	handle /health* {
+		reverse_proxy backend:8000
 	}
 
 	# Everything else → Next.js frontend

@@ -1,16 +1,19 @@
 """Mock Ollama-compatible LLM server for load testing.
 
 Mimics both Ollama native (/api/chat, /api/tags) and OpenAI-compatible
-(/v1/chat/completions) endpoints with configurable latency. Isolates
-Arbor load tests from real LLM inference costs and GPU contention.
+(/v1/chat/completions) endpoints with configurable latency, GPU concurrency
+simulation, tool-call multi-turn, and cold start delay.
 
 Usage:
     uv run python tests/load/mock_llm_server.py
 
 Environment:
-    MOCK_LLM_PORT          - Port to listen on (default: 11434)
-    MOCK_LLM_LATENCY_MIN   - Minimum response delay in seconds (default: 2.0)
-    MOCK_LLM_LATENCY_MAX   - Maximum response delay in seconds (default: 5.0)
+    MOCK_LLM_PORT              - Port to listen on (default: 11434)
+    MOCK_LLM_LATENCY_MIN       - Minimum response delay in seconds (default: 2.0)
+    MOCK_LLM_LATENCY_MAX       - Maximum response delay in seconds (default: 8.0)
+    MOCK_LLM_MAX_CONCURRENT    - GPU slot simulation (default: 4)
+    MOCK_COLD_START_DELAY_S    - First-request delay after idle (default: 3.0)
+    MOCK_IDLE_THRESHOLD_S      - Seconds idle before cold start fires (default: 300)
 """
 
 from __future__ import annotations
@@ -29,9 +32,18 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Mock LLM Server (Load Testing)")
 
+# --- Configuration ---
 LATENCY_MIN = float(os.environ.get("MOCK_LLM_LATENCY_MIN", "2.0"))
-LATENCY_MAX = float(os.environ.get("MOCK_LLM_LATENCY_MAX", "5.0"))
+LATENCY_MAX = float(os.environ.get("MOCK_LLM_LATENCY_MAX", "8.0"))
 DEFAULT_MODEL = os.environ.get("MOCK_LLM_MODEL", "qwen3:latest")
+MAX_CONCURRENT = int(os.environ.get("MOCK_LLM_MAX_CONCURRENT", "4"))
+COLD_START_DELAY = float(os.environ.get("MOCK_COLD_START_DELAY_S", "3.0"))
+IDLE_THRESHOLD = float(os.environ.get("MOCK_IDLE_THRESHOLD_S", "300"))
+
+# --- State ---
+_gpu_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+_last_request_time: float = time.monotonic()
+_active_requests: int = 0
 
 # Canned advisory responses that look realistic
 CANNED_RESPONSES = [
@@ -69,6 +81,37 @@ CANNED_RESPONSES = [
 ]
 
 
+async def _apply_cold_start() -> None:
+    """Simulate model loading delay if idle too long."""
+    global _last_request_time
+    now = time.monotonic()
+    if now - _last_request_time > IDLE_THRESHOLD:
+        await asyncio.sleep(COLD_START_DELAY)
+    _last_request_time = now
+
+
+def _is_tool_call_turn(messages: list) -> bool:
+    """Determine if this turn should return a tool_call.
+
+    First response in a conversation returns a tool_call (search_kb).
+    Subsequent turns (after tool results) return text. This simulates
+    the real Delegate multi-turn loop.
+    """
+    if not messages:
+        return True
+    # If the last message is a tool result, return text
+    for msg in reversed(messages):
+        role = msg.get("role", "")
+        if role == "tool":
+            return False
+        if role == "assistant":
+            # Check if assistant already made a tool call
+            if msg.get("tool_calls"):
+                return False
+            break
+    return True
+
+
 # ── Ollama Native API (/api/*) ────────────────────────────
 
 
@@ -77,36 +120,78 @@ async def ollama_chat(request: Request) -> JSONResponse | StreamingResponse:
     """Mock Ollama /api/chat endpoint (native format).
 
     This is what kaizen-agents OllamaStreamAdapter calls.
+    Simulates GPU contention via semaphore and multi-turn tool calling.
     """
+    global _active_requests
+
+    await _apply_cold_start()
     body = await request.json()
     delay = random.uniform(LATENCY_MIN, LATENCY_MAX)
-    response_text = random.choice(CANNED_RESPONSES)
     model = body.get("model", DEFAULT_MODEL)
-    stream = body.get("stream", True)  # Ollama defaults to streaming
+    stream = body.get("stream", True)
+    messages = body.get("messages", [])
 
-    if stream:
-        return StreamingResponse(
-            _ollama_stream_response(response_text, model, delay),
-            media_type="application/x-ndjson",
-        )
+    # Tool-call simulation: first turn returns tool_call, second returns text
+    if _is_tool_call_turn(messages) and body.get("tools"):
+        return await _ollama_tool_call_response(model, delay)
 
-    # Non-streaming
-    await asyncio.sleep(delay)
-    input_tokens = sum(len(str(m.get("content", "")).split()) * 2 for m in body.get("messages", []))
-    output_tokens = len(response_text.split()) * 2
+    response_text = random.choice(CANNED_RESPONSES)
+
+    async with _gpu_semaphore:
+        _active_requests += 1
+        try:
+            if stream:
+                return StreamingResponse(
+                    _ollama_stream_response(response_text, model, delay),
+                    media_type="application/x-ndjson",
+                )
+
+            # Non-streaming
+            await asyncio.sleep(delay)
+            input_tokens = sum(len(str(m.get("content", "")).split()) * 2 for m in messages)
+            output_tokens = len(response_text.split()) * 2
+
+            return JSONResponse(
+                {
+                    "model": model,
+                    "created_at": _iso_now(),
+                    "message": {"role": "assistant", "content": response_text},
+                    "done": True,
+                    "total_duration": int(delay * 1e9),
+                    "load_duration": 0,
+                    "prompt_eval_count": input_tokens,
+                    "prompt_eval_duration": int(delay * 0.3 * 1e9),
+                    "eval_count": output_tokens,
+                    "eval_duration": int(delay * 0.7 * 1e9),
+                }
+            )
+        finally:
+            _active_requests -= 1
+
+
+async def _ollama_tool_call_response(model: str, delay: float) -> JSONResponse:
+    """Return a tool_call response (search_kb) for multi-turn simulation."""
+    async with _gpu_semaphore:
+        await asyncio.sleep(delay * 0.5)  # Tool calls are faster
 
     return JSONResponse(
         {
             "model": model,
             "created_at": _iso_now(),
-            "message": {"role": "assistant", "content": response_text},
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "search_kb",
+                            "arguments": {"query": "employment act provisions"},
+                        }
+                    }
+                ],
+            },
             "done": True,
-            "total_duration": int(delay * 1e9),
-            "load_duration": 0,
-            "prompt_eval_count": input_tokens,
-            "prompt_eval_duration": int(delay * 0.3 * 1e9),
-            "eval_count": output_tokens,
-            "eval_duration": int(delay * 0.7 * 1e9),
+            "total_duration": int(delay * 0.5 * 1e9),
         }
     )
 
@@ -171,7 +256,6 @@ async def ollama_embeddings(request: Request) -> JSONResponse:
     """Mock Ollama /api/embeddings — returns random embedding vector."""
     body = await request.json()
     dimensions = int(os.environ.get("EMBEDDING_DIMENSIONS", "1024"))
-    # Return a deterministic-ish embedding based on input hash
     seed = hash(body.get("prompt", "")) & 0xFFFFFFFF
     rng = random.Random(seed)
     embedding = [rng.gauss(0, 0.1) for _ in range(dimensions)]
@@ -201,41 +285,49 @@ async def openai_chat_completions(
     request: OpenAIChatRequest,
 ) -> JSONResponse | StreamingResponse:
     """Mock OpenAI-compatible chat completions (for BYOK/vLLM/TGI users)."""
+    global _active_requests
+
+    await _apply_cold_start()
     delay = random.uniform(LATENCY_MIN, LATENCY_MAX)
     response_text = random.choice(CANNED_RESPONSES)
     completion_id = f"chatcmpl-{os.urandom(6).hex()}"
     created = int(time.time())
 
-    if request.stream:
-        return StreamingResponse(
-            _openai_stream_response(response_text, completion_id, created, delay),
-            media_type="text/event-stream",
-        )
+    async with _gpu_semaphore:
+        _active_requests += 1
+        try:
+            if request.stream:
+                return StreamingResponse(
+                    _openai_stream_response(response_text, completion_id, created, delay),
+                    media_type="text/event-stream",
+                )
 
-    await asyncio.sleep(delay)
-    input_tokens = sum(len(m.content.split()) * 2 for m in request.messages)
-    output_tokens = len(response_text.split()) * 2
+            await asyncio.sleep(delay)
+            input_tokens = sum(len(m.content.split()) * 2 for m in request.messages)
+            output_tokens = len(response_text.split()) * 2
 
-    return JSONResponse(
-        {
-            "id": completion_id,
-            "object": "chat.completion",
-            "created": created,
-            "model": request.model,
-            "choices": [
+            return JSONResponse(
                 {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": response_text},
-                    "finish_reason": "stop",
+                    "id": completion_id,
+                    "object": "chat.completion",
+                    "created": created,
+                    "model": request.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": response_text},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": input_tokens,
+                        "completion_tokens": output_tokens,
+                        "total_tokens": input_tokens + output_tokens,
+                    },
                 }
-            ],
-            "usage": {
-                "prompt_tokens": input_tokens,
-                "completion_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens,
-            },
-        }
-    )
+            )
+        finally:
+            _active_requests -= 1
 
 
 async def _openai_stream_response(
@@ -288,12 +380,16 @@ async def openai_list_models() -> JSONResponse:
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    """Health check."""
+    """Health check with concurrency info."""
     return JSONResponse(
         {
             "status": "ok",
             "model": DEFAULT_MODEL,
             "latency_range_s": [LATENCY_MIN, LATENCY_MAX],
+            "max_concurrent": MAX_CONCURRENT,
+            "active_requests": _active_requests,
+            "cold_start_delay_s": COLD_START_DELAY,
+            "idle_threshold_s": IDLE_THRESHOLD,
             "endpoints": ["/api/chat", "/api/tags", "/api/embeddings", "/v1/chat/completions"],
         }
     )
@@ -311,5 +407,7 @@ if __name__ == "__main__":
     print(f"Mock LLM server starting on port {port}")
     print(f"Model: {DEFAULT_MODEL}")
     print(f"Latency range: {LATENCY_MIN}s - {LATENCY_MAX}s")
+    print(f"Max concurrent (GPU slots): {MAX_CONCURRENT}")
+    print(f"Cold start delay: {COLD_START_DELAY}s after {IDLE_THRESHOLD}s idle")
     print(f"Endpoints: /api/chat, /api/tags, /api/embeddings, /v1/chat/completions")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

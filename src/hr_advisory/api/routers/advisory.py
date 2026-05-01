@@ -12,8 +12,10 @@ Handles HR advisory queries with the safety chain:
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
+import os
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -55,6 +57,17 @@ logger = logging.getLogger(__name__)
 ARBOR_DELEGATE_VERSION = "v3.0.0"
 
 router = APIRouter()
+
+# Dedicated thread pool for LLM inference calls — isolates from default executor
+# so DB, briefing, and other async ops don't queue behind slow LLM calls.
+_LLM_WORKERS = max(1, min(int(os.environ.get("LLM_EXECUTOR_WORKERS", "4")), 16))
+_LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_LLM_WORKERS,
+    thread_name_prefix="arbor-llm",
+)
+import atexit as _atexit
+
+_atexit.register(_LLM_EXECUTOR.shutdown, wait=False)
 
 # Install Kaizen provider monkey-patch for BYOK support.
 # Safe to call multiple times (idempotent).
@@ -214,7 +227,7 @@ async def advisory_query(
         raise HTTPException(status_code=400, detail=error_msg)
 
     # ── Step 2: Rate limiting ───────────────────────────────────
-    if not check_rate_limit(user_id):
+    if not check_rate_limit(user_id, max_requests=5):
         raise HTTPException(
             status_code=429,
             detail="You've sent too many requests. Please wait a moment and try again.",
@@ -313,10 +326,10 @@ async def advisory_query(
         require_server_default=True,
     )
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     engine_result = await asyncio.wait_for(
         loop.run_in_executor(
-            None,
+            _LLM_EXECUTOR,
             lambda: run_delegate_sync(
                 prompt=query,
                 config=delegate_config,
@@ -536,7 +549,7 @@ async def advisory_stream(
         raise HTTPException(status_code=400, detail=error_msg)
 
     # ── Step 2: Rate limiting ───────────────────────────────────
-    if not check_rate_limit(user_id):
+    if not check_rate_limit(user_id, max_requests=5):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait.")
 
     # ── Step 3: Load conversation memory ──────────────────────────

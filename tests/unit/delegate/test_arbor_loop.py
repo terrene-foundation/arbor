@@ -126,3 +126,62 @@ def test_concurrent_create_delegate_isolated(_make_ollama_adapter):
     assert da.loop._adapter is adapter_a
     assert db.loop._adapter is adapter_b
     assert da.loop._adapter is not db.loop._adapter
+
+
+# ---------------------------------------------------------------------------
+# Ollama-first env fallback (legacy/script/test path)
+# ---------------------------------------------------------------------------
+
+
+def test_env_fallback_resolves_ollama_when_openai_absent(monkeypatch):
+    """_resolve_llm_settings_from_env picks Ollama when only OLLAMA_* are set.
+
+    Regression: arbor runs Ollama-first, but the legacy env fallback
+    previously defaulted to OpenAI even with OLLAMA_BASE_URL + OLLAMA_MODEL
+    set, causing adversarial-runner and other script-path callers to fail
+    with "No OpenAI API key found".
+    """
+    from hr_advisory.delegate.arbor_loop import (
+        DelegateConfig,
+        _resolve_llm_settings_from_env,
+    )
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("DEFAULT_LLM_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_PROD_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:latest")
+
+    provider, model, api_key, base_url = _resolve_llm_settings_from_env(DelegateConfig())
+    assert provider == "ollama"
+    assert model == "qwen3:latest"
+    assert base_url == "http://localhost:11434"
+
+
+def test_env_fallback_prefers_openai_when_key_present(monkeypatch):
+    """OpenAI wins over Ollama when OPENAI_API_KEY is set."""
+    from hr_advisory.delegate.arbor_loop import (
+        DelegateConfig,
+        _resolve_llm_settings_from_env,
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("LLM_MODEL", "gpt-5-test")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:latest")
+
+    provider, model, _api_key, _base_url = _resolve_llm_settings_from_env(DelegateConfig())
+    assert provider == "openai"
+    assert model == "gpt-5-test"
+
+
+def test_create_delegate_builds_ollama_adapter_in_legacy_path(ollama_only_env, monkeypatch):
+    """create_delegate builds an OllamaStreamAdapter when provider=ollama."""
+    from kaizen_agents.delegate.adapters.ollama_adapter import OllamaStreamAdapter
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:latest")
+
+    delegate = create_delegate(DelegateConfig())
+    assert isinstance(delegate.loop._adapter, OllamaStreamAdapter)

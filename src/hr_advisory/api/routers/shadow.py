@@ -17,6 +17,7 @@ engine (intent classifier, tool registry, executor, PACE manager).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -600,8 +601,8 @@ async def shadow_execute(
     user_id = str(current_user.get("sub", "anonymous"))
     jwt_token = _get_jwt_token(request)
 
-    # Rate limit — /execute triggers LLM calls
-    if not check_rate_limit(user_id):
+    # Rate limit — /execute triggers LLM calls (tighter 5/60s limit for GPU protection)
+    if not check_rate_limit(user_id, max_requests=5):
         raise HTTPException(status_code=429, detail="Too many requests. Please wait a moment.")
 
     if not message:
@@ -737,7 +738,7 @@ async def shadow_execute(
     tool_calls: list[dict] = []
     error_msg: str | None = None
 
-    try:
+    async def _run_delegate():
         async for event in delegate.run(prompt):
             if isinstance(event, TextDelta):
                 full_text.append(event.text)
@@ -751,7 +752,14 @@ async def shadow_execute(
                         tc["error"] = event.error
                         break
             elif isinstance(event, ErrorEvent):
+                nonlocal error_msg
                 error_msg = event.error
+
+    try:
+        await asyncio.wait_for(_run_delegate(), timeout=60.0)
+    except asyncio.TimeoutError:
+        logger.warning("shadow.execute.timeout", extra={"user_id": user_id})
+        error_msg = "I took too long to respond. Please try a simpler question."
     except Exception as exc:
         logger.error("Delegate execution failed: %s", exc, exc_info=True)
         error_msg = "The assistant encountered an error processing your request."
@@ -1835,7 +1843,7 @@ async def shadow_briefing(
     import asyncio
 
     _cid = company_id or 0
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     briefing = await loop.run_in_executor(None, generate_briefing, _cid, user_role)
 
     logger.info(
@@ -1880,7 +1888,7 @@ async def shadow_nudges(
     import asyncio
 
     _cid = company_id or 0
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     nudges = await loop.run_in_executor(None, get_nudges, _cid, user_id, page, user_role)
 
     logger.info(

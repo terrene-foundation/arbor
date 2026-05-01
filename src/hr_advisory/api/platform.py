@@ -112,11 +112,52 @@ def create_platform(settings: Settings | None = None) -> Nexus:
     # --- Register routers ---
     _register_routers(app)
 
+    # --- Health endpoint with DB probe ---
+    _register_health(fast_api)
+
     # --- Register handler-based workflows ---
     _register_handlers(app, session_store)
 
     logger.info("HR Advisory platform configured with NexusEngine (SAAS preset)")
     return app
+
+
+def _register_health(fast_api) -> None:
+    """Register a health endpoint with a real DB probe.
+
+    Overrides any Nexus-provided /health by registering directly on the
+    gateway FastAPI app. Returns 503 when DB is unreachable so Caddy
+    stops routing traffic to a broken backend.
+
+    Per connection-pool.md Rule 3: uses lightweight SELECT 1 with a
+    dedicated connection, never a full DataFlow workflow.
+    """
+    import asyncio
+
+    from fastapi import Response
+
+    @fast_api.get("/health")
+    async def health_check():
+        db_ok = False
+        try:
+            from hr_advisory.models.database import db as dataflow_db
+
+            cm = getattr(dataflow_db, "_connection_manager", None)
+            if cm is not None and hasattr(cm, "test_connection"):
+                result = await asyncio.wait_for(cm.test_connection(), timeout=5.0)
+                db_ok = result.get("status") == "connected"
+        except Exception:
+            pass
+
+        if db_ok:
+            return {"status": "healthy", "db": "ok"}
+        return Response(
+            content='{"status": "unhealthy", "db": "unreachable"}',
+            status_code=503,
+            media_type="application/json",
+        )
+
+    logger.info("Health endpoint registered with DB probe")
 
 
 def _register_routers(app: Nexus) -> None:

@@ -63,34 +63,58 @@ class DelegateConfig:
     require_server_default: bool = False
 
 
-def _resolve_llm_settings_from_env(config: DelegateConfig) -> tuple[str, str, str | None]:
-    """Resolve model, api_key, base_url from config + env vars.
+def _resolve_llm_settings_from_env(
+    config: DelegateConfig,
+) -> tuple[str, str, str, str | None]:
+    """Resolve provider, model, api_key, base_url from config + env vars.
 
     Used when ``DelegateConfig.adapter is None`` (legacy/script path).
     BYOK contexts MUST pass an explicit adapter via DelegateConfig.adapter.
 
-    Priority: config > LLM_* (generic) > OPENAI_* (provider-specific) > defaults.
+    Resolution order:
+    1. If OPENAI_API_KEY is set, use OpenAI via LLM_MODEL / OPENAI_PROD_MODEL.
+    2. Else if OLLAMA_BASE_URL and OLLAMA_MODEL are set, use Ollama.
+    3. Else fall back to the best-effort env values and let the downstream
+       adapter factory raise a clear error.
     """
-    model = (
-        config.model
-        or os.environ.get("LLM_MODEL")
-        or os.environ.get("DEFAULT_LLM_MODEL")
-        or os.environ.get("OPENAI_PROD_MODEL")
-        or ""
-    )
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    ollama_base_url = os.environ.get("OLLAMA_BASE_URL")
+    ollama_model = os.environ.get("OLLAMA_MODEL")
 
-    api_key = (
-        config.api_key
-        or os.environ.get("LLM_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or "not-needed"
-    )
+    if config.api_key or openai_api_key:
+        provider = "openai"
+        model = (
+            config.model
+            or os.environ.get("LLM_MODEL")
+            or os.environ.get("DEFAULT_LLM_MODEL")
+            or os.environ.get("OPENAI_PROD_MODEL")
+            or ""
+        )
+        api_key = config.api_key or openai_api_key or "not-needed"
+        base_url = (
+            config.base_url or os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+        )
+        return provider, model, api_key, base_url
 
-    base_url = (
-        config.base_url or os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
-    )
+    if ollama_base_url and ollama_model:
+        # Arbor runs Ollama-first; this branch makes legacy/script/test paths
+        # (e.g. run_delegate_sync in the adversarial runner) work without an
+        # OpenAI key.
+        return (
+            "ollama",
+            config.model or ollama_model,
+            "not-needed",
+            config.base_url or ollama_base_url,
+        )
 
-    return model, api_key, base_url
+    # Last-ditch fallback: return whatever we have and let the adapter
+    # factory raise a clear error downstream.
+    return (
+        "openai",
+        config.model or os.environ.get("LLM_MODEL") or os.environ.get("DEFAULT_LLM_MODEL") or "",
+        config.api_key or "not-needed",
+        config.base_url,
+    )
 
 
 def create_delegate(config: DelegateConfig | None = None) -> Delegate:
@@ -144,19 +168,42 @@ def create_delegate(config: DelegateConfig | None = None) -> Delegate:
         )
     else:
         # Legacy/script/test path — resolve from env vars
-        model, api_key, base_url = _resolve_llm_settings_from_env(config)
+        provider, model, api_key, base_url = _resolve_llm_settings_from_env(config)
         logger.info(
-            "Delegate LLM: adapter=env-fallback, model=%s, base_url=%s",
+            "Delegate LLM: adapter=env-fallback, provider=%s, model=%s, base_url=%s",
+            provider,
             model,
-            base_url or "(default: OpenAI)",
+            base_url or "(default)",
         )
-        delegate = Delegate(
-            model=model,
-            tools=registry,
-            system_prompt=system_prompt,
-            max_turns=config.max_turns,
-            budget_usd=config.budget_usd,
-        )
+        if provider == "ollama":
+            # Build an explicit Ollama adapter — kaizen-agents' model-only
+            # resolution path defaults to OpenAI when no provider prefix is
+            # present in the model string, which would fail without an API
+            # key even though Ollama is serving locally.
+            from kaizen_agents.delegate.adapters import get_adapter
+
+            adapter = get_adapter(
+                provider="ollama",
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+            )
+            delegate = Delegate(
+                model=model,
+                tools=registry,
+                system_prompt=system_prompt,
+                max_turns=config.max_turns,
+                budget_usd=config.budget_usd,
+                adapter=adapter,
+            )
+        else:
+            delegate = Delegate(
+                model=model,
+                tools=registry,
+                system_prompt=system_prompt,
+                max_turns=config.max_turns,
+                budget_usd=config.budget_usd,
+            )
 
     # Configure the hydrator's always-active tools so the LLM sees them
     # without needing to call search_tools first.

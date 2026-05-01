@@ -242,11 +242,20 @@ _WINDOW_SECONDS = 60
 _MAX_REQUESTS_PER_WINDOW = 30
 
 
-def check_rate_limit(user_id: str) -> bool:
+def check_rate_limit(user_id: str, max_requests: int = _MAX_REQUESTS_PER_WINDOW) -> bool:
     """Check if a user has exceeded the rate limit.
+
+    Args:
+        user_id: Unique identifier for the user.
+        max_requests: Maximum requests per window (must be >= 1). Default 30
+            for general endpoints. Use 5 for LLM-consuming endpoints (advisory,
+            shadow execute) to prevent GPU monopolization.
 
     Returns True if the request should be ALLOWED, False if rate-limited.
     """
+    if max_requests < 1:
+        max_requests = 1
+
     now = datetime.now()
 
     # Evict oldest users if at capacity
@@ -265,7 +274,7 @@ def check_rate_limit(user_id: str) -> bool:
         t for t in _request_counts[user_id] if (now - t).total_seconds() < _WINDOW_SECONDS
     ]
 
-    if len(_request_counts[user_id]) >= _MAX_REQUESTS_PER_WINDOW:
+    if len(_request_counts[user_id]) >= max_requests:
         return False
 
     _request_counts[user_id].append(now)
