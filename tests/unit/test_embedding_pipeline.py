@@ -11,29 +11,17 @@ Mock contracts pinned to:
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Prevent Kaizen import chain (pre-existing SDK version mismatch).
-_kaizen_mods = [
-    "kaizen",
-    "kaizen.core",
-    "kaizen.core.base_agent",
-    "kaizen.memory",
-    "kaizen.config",
-    "kaizen.config.providers",
-    "kaizen.signatures",
-    "kaizen.core.workflow_generator",
-    "kaizen.nodes",
-    "kaizen.nodes.ai",
-    "kaizen.nodes.ai.llm_agent",
-]
-for _m in _kaizen_mods:
-    if _m not in sys.modules:
-        sys.modules[_m] = MagicMock()
+# NOTE: Earlier revisions installed `MagicMock()` into `sys.modules` for
+# `kaizen.*` to work around a broken import chain. That workaround corrupted
+# `sys.modules` for every test file collected after this one, causing metaclass
+# conflicts when a later test imported the REAL `hr_advisory.agents.actions.document_gen`
+# (which does `from kaizen import Agent as BaseAgent`). kailash-kaizen 2.7.4
+# imports cleanly, so the shim has been removed.
 
 from hr_advisory.kb.embeddings import EMBEDDING_DIMENSIONS, EmbeddingPipeline
 

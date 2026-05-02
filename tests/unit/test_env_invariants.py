@@ -6,46 +6,16 @@ Tests that the server refuses to start with invalid LLM configuration.
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-# Prevent Kaizen import chain (pre-existing SDK version mismatch).
-# Must be done before importing hr_advisory.api.server which triggers
-# the full import chain through platform -> routers -> agents.
-_kaizen_mods = [
-    "kaizen",
-    "kaizen.core",
-    "kaizen.core.base_agent",
-    "kaizen.memory",
-    "kaizen.config",
-    "kaizen.config.providers",
-    "kaizen.signatures",
-    "kaizen.signatures.core",
-    "kaizen.core.workflow_generator",
-    "kaizen.nodes",
-    "kaizen.nodes.ai",
-    "kaizen.nodes.ai.llm_agent",
-]
-# Build consistent mock chain: kaizen.signatures needs a real-ish SignatureMeta
-# so that downstream Signature subclasses don't hit metaclass conflicts.
-_sig_meta = type("SignatureMeta", (type,), {})
-_mock_signature = _sig_meta("Signature", (), {})
-for _m in _kaizen_mods:
-    if _m not in sys.modules:
-        mod = MagicMock()
-        if _m == "kaizen.signatures":
-            mod.Signature = _mock_signature
-            mod.core.SignatureMeta = _sig_meta
-        elif _m == "kaizen.signatures.core":
-            mod.SignatureMeta = _sig_meta
-        elif _m == "kaizen":
-            mod.Signature = _mock_signature
-            mod.InputField = MagicMock()
-            mod.OutputField = MagicMock()
-            mod.Agent = type("Agent", (), {"run_sync": lambda self, task: MagicMock(text="{}")})
-        sys.modules[_m] = mod
+# NOTE: Earlier revisions installed `MagicMock()` into `sys.modules` for
+# `kaizen.*` to work around a broken import chain. That workaround corrupted
+# `sys.modules` for every test file collected after this one, causing metaclass
+# conflicts when a later test imported the REAL `hr_advisory.agents.actions.document_gen`
+# (which does `from kaizen import Agent as BaseAgent`). kailash-kaizen 2.7.4
+# imports cleanly, so the shim has been removed.
 
 from hr_advisory.api.server import _validate_env_invariants
 from hr_advisory.config.settings import Settings
