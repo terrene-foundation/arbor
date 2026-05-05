@@ -2,8 +2,10 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies (prism-web is a vendored tarball — see specs / issue:
+# long-term track is publishing @kailash/prism-web to npm)
 COPY apps/web/package*.json ./
+COPY apps/web/vendor ./vendor
 RUN npm ci
 
 # Copy source and build
