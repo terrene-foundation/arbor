@@ -7,7 +7,7 @@ This is a **skeleton index covering the as-built system** — Arbor M01-M59 ship
 The detailed sources of authority remain:
 
 - `.claude/skills/project/SKILL.md` — 18 project skills grouped by domain (most authoritative for as-built behavior)
-- `.claude/skills/project/*.md` — per-domain knowledge (advisory safety chain, ollama-byok-provider, k8s-staging-deploy, etc.)
+- `.claude/skills/project/*.md` — per-domain knowledge (advisory safety chain, ollama-byok-provider, k8s-deploy, etc.)
 - `.claude/agents/project/*.md` — domain agent specifications
 - `memory/MEMORY.md` — institutional knowledge across sessions
 - `briefs/` — original product briefs (under `workspaces/hr-ai-advisory/briefs/` if present)
