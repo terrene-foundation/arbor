@@ -1,5 +1,7 @@
 # Deployment: Shadow Agent (2026-03-20)
 
+> **Historical record (annotated 2026-05-07).** Line 43 below references "GCE arbor-prod (asia-southeast1-b, terrene-care project)" — that infrastructure never existed per project owner (2026-05-07). The **commits + functional change** are authoritative; the deploy target may have actually been the DGX K8s cluster, mislabelled at the time. Current deploy reality lives in `deploy/deployment-config.md` and `.claude/skills/project/k8s-deploy.md`.
+
 ## Summary
 
 Deployed Shadow Agent intelligence layer (M61-M65) to production.

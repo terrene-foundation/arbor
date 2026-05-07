@@ -1,5 +1,5 @@
 /**
- * Production smoke test — verifies https://arbor.terrene.foundation is serving
+ * Production smoke test — verifies https://arbor.aitelab.net is serving
  * the current release correctly after deploy. Run via:
  *   cd apps/web && npx playwright test tests/e2e/10-production-smoke.spec.ts \
  *     --project=chromium --reporter=list
@@ -7,7 +7,7 @@
 
 import { test, expect } from "@playwright/test";
 
-const PROD_URL = "https://arbor.terrene.foundation";
+const PROD_URL = "https://arbor.aitelab.net";
 
 /** Every top-level route a user can hit, protected or not. Protected routes
  *  should redirect an unauthenticated visitor to /login (HTTP 200 from the
@@ -103,18 +103,18 @@ test.describe("Production smoke", () => {
   }) => {
     const resp = await request.get(PROD_URL);
     const headers = resp.headers();
-    // Per deploy/deployment-config.md, these are enforced by Caddy
+    // HSTS + nosniff terminated at Cloudflare in front of the cluster ingress.
     expect(headers["strict-transport-security"]).toBeTruthy();
     expect(headers["strict-transport-security"]).toMatch(/max-age=\d+/);
     expect(headers["x-content-type-options"]).toBe("nosniff");
   });
 
   test("frontend redirects HTTP to HTTPS", async ({ request }) => {
-    const resp = await request.get("http://arbor.terrene.foundation/", {
+    const resp = await request.get("http://arbor.aitelab.net/", {
       maxRedirects: 0,
       failOnStatusCode: false,
     });
-    // 301 or 308 redirect to https (depending on Caddy config)
+    // 301 or 308 redirect to https (Cloudflare "Always Use HTTPS").
     expect([301, 308]).toContain(resp.status());
   });
 

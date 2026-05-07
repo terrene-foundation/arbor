@@ -1,5 +1,7 @@
 # Production Hardening Specification
 
+> **Translation note (2026-05-07).** This spec was authored against the now-removed `docker-compose.prod.yml` / Caddy / GCE deploy path that never actually existed. The **app-level items** (§ 2 dedicated LLM executor, § 3 advisory rate limit, § 6 DataFlow pool timeout, § 7 health DB probe, § 8 shadow execute timeout) translate directly to the K8s deploy and remain authoritative. The **infrastructure items** (§ 1 Ollama env vars, § 4 Caddy SSE path, § 5 docker-compose gaps, § 11 Ollama in compose) need to be re-expressed as K8s `Deployment` env vars / `ConfigMap` / ingress annotations against the live cluster. The priority order table at the bottom references `deploy/Caddyfile` and `deploy/docker-compose.prod.yml` which no longer exist; map each row to the corresponding K8s manifest before action.
+
 ## Objective
 
 Fix infrastructure gaps discovered during load testing analysis to achieve stable operation under realistic concurrent load (8-12 users, 3-4 in active advisory).
@@ -140,16 +142,16 @@ Wrap `shadow/execute` delegate loop in `asyncio.wait_for(timeout=60.0)`.
 
 ## Priority Order
 
-| #   | Change                       | Files                                       | Risk                              |
-| --- | ---------------------------- | ------------------------------------------- | --------------------------------- |
-| 1   | Caddy SSE path fix           | `deploy/Caddyfile`                          | Low (config only)                 |
-| 2   | Dedicated LLM executor       | `advisory.py`                               | Low (isolated change)             |
-| 3   | Advisory rate limit          | `guardrails.py`, `advisory.py`, `shadow.py` | Low                               |
-| 4   | Mock LLM concurrency limiter | `tests/load/mock_llm_server.py`             | Low (test only)                   |
-| 5   | DATAFLOW_MAX_CONNECTIONS     | `deploy/docker-compose.prod.yml`            | Low (config only)                 |
-| 6   | Redis tuning                 | `deploy/docker-compose.prod.yml`            | Low (config only)                 |
-| 7   | Health DB probe              | `platform.py` or health handler             | Medium                            |
-| 8   | Shadow execute timeout       | `shadow.py`                                 | Medium                            |
-| 9   | DataFlow pool timeout        | `database.py`                               | Medium (needs DataFlow API check) |
-| 10  | Docker resource limits       | `deploy/docker-compose.prod.yml`            | Low (config only)                 |
-| 11  | Ollama in compose            | `deploy/docker-compose.prod.yml`            | Medium (GPU config)               |
+| #   | Change                       | Files                                             | Risk                              |
+| --- | ---------------------------- | ------------------------------------------------- | --------------------------------- |
+| 1   | SSE path fix on ingress      | K8s ingress (`/api/advisory/stream*` annotations) | Low (config only)                 |
+| 2   | Dedicated LLM executor       | `advisory.py`                                     | Low (isolated change)             |
+| 3   | Advisory rate limit          | `guardrails.py`, `advisory.py`, `shadow.py`       | Low                               |
+| 4   | Mock LLM concurrency limiter | `tests/load/mock_llm_server.py`                   | Low (test only)                   |
+| 5   | DATAFLOW_MAX_CONNECTIONS     | K8s backend Deployment env / ConfigMap            | Low (config only)                 |
+| 6   | Redis tuning                 | K8s redis Deployment / ConfigMap                  | Low (config only)                 |
+| 7   | Health DB probe              | `platform.py` or health handler                   | Medium                            |
+| 8   | Shadow execute timeout       | `shadow.py`                                       | Medium                            |
+| 9   | DataFlow pool timeout        | `database.py`                                     | Medium (needs DataFlow API check) |
+| 10  | Resource limits              | K8s backend Deployment `resources:` block         | Low (config only)                 |
+| 11  | Ollama configuration         | K8s ollama Deployment env + GPU reservation       | Medium (GPU config)               |
