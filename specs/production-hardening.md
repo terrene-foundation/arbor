@@ -19,7 +19,7 @@ OLLAMA_KEEP_ALIVE=30m          # Prevent cold starts during business hours
 OLLAMA_MAX_QUEUE=8             # Reject rather than queue infinitely
 ```
 
-Add Ollama to `docker-compose.prod.yml` with GPU reservation.
+Add these to the K8s ollama Deployment as `env:` entries on the container, with a GPU reservation in `resources.limits` (`nvidia.com/gpu: 1`) and a PVC mount at `/root/.ollama` for the model cache.
 
 ## 2. Dedicated LLM ThreadPoolExecutor
 

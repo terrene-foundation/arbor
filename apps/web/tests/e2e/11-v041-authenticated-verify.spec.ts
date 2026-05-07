@@ -2,7 +2,7 @@
  * v0.4.1 authenticated verification — run once against live production to
  * prove the AI settings fix works end-to-end for a user with company_id=null.
  *
- * Registers a fresh throwaway user on arbor.terrene.foundation (public
+ * Registers a fresh throwaway user on arbor.aitelab.net (public
  * registration always returns company_id=null), injects the access/refresh
  * tokens into localStorage, loads /settings/ai in a real browser, and
  * asserts:
@@ -22,7 +22,7 @@
 
 import { test, expect, type APIResponse } from "@playwright/test";
 
-const PROD_URL = "https://arbor.terrene.foundation";
+const PROD_URL = "https://arbor.aitelab.net";
 
 interface RegisterResponse {
   user: { id: number; email: string; company_id: number | null };

@@ -86,12 +86,11 @@ Per `rules/specs-authority.md` MUST 2: organize by domain ontology, not COC proc
 
 ### Production Operations
 
-| File                   | Domain | Status      | Description                                                                                                 |
-| ---------------------- | ------ | ----------- | ----------------------------------------------------------------------------------------------------------- |
-| `deploy-staging.md`    | Ops    | placeholder | tag → GH Actions → Docker Hub → jumper kubectl rollout (see `.claude/skills/project/k8s-staging-deploy.md`) |
-| `deploy-production.md` | Ops    | placeholder | GCE arbor-prod (asia-southeast1-b); rsync via SSH key + docker compose rebuild                              |
-| `health-probes.md`     | Ops    | placeholder | `/health` with DB probe (PR #24); 503 on DB unreachable                                                     |
-| `load-testing.md`      | Ops    | placeholder | locust + mock LLM server; 4 user classes; weighted traffic mix                                              |
+| File               | Domain | Status      | Description                                                                                                                                                                                                            |
+| ------------------ | ------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy.md`        | Ops    | placeholder | Single env: `arbor.aitelab.net` (DGX K8s) — tag → GH Actions → Docker Hub → ttyd jumper at `arbordev.aitelab.net` → `kubectl set image`. See `.claude/skills/project/k8s-deploy.md` and `deploy/deployment-config.md`. |
+| `health-probes.md` | Ops    | placeholder | `/health` with DB probe (PR #24); 503 on DB unreachable                                                                                                                                                                |
+| `load-testing.md`  | Ops    | placeholder | locust + mock LLM server; 4 user classes; weighted traffic mix                                                                                                                                                         |
 
 ## Cross-domain invariants (must hold in every spec)
 
