@@ -26,6 +26,15 @@ export function AdvisoryPanel() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  /* Action-driven close: every path that closes the panel also resets
+   * `historyOpen` so reopening shows a fresh state. Replaces the prior
+   * `useEffect(() => { if (!isOpen) setHistoryOpen(false); }, [isOpen])`
+   * which violated `react-hooks/set-state-in-effect`. */
+  const closeAndResetHistory = useCallback(() => {
+    setHistoryOpen(false);
+    close();
+  }, [close]);
+
   /* Close on Escape key */
   useEffect(() => {
     if (!isOpen) return;
@@ -33,13 +42,13 @@ export function AdvisoryPanel() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        close();
+        closeAndResetHistory();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, close]);
+  }, [isOpen, closeAndResetHistory]);
 
   /* Focus trap: keep tab within the panel when open */
   useEffect(() => {
@@ -82,13 +91,6 @@ export function AdvisoryPanel() {
     return () => window.removeEventListener("keydown", handleTabTrap);
   }, [isOpen]);
 
-  /* Close history when panel closes */
-  useEffect(() => {
-    if (!isOpen) {
-      setHistoryOpen(false);
-    }
-  }, [isOpen]);
-
   const handleToggleHistory = useCallback(() => {
     setHistoryOpen((prev) => !prev);
   }, []);
@@ -107,8 +109,8 @@ export function AdvisoryPanel() {
   );
 
   const handleScrimClick = useCallback(() => {
-    close();
-  }, [close]);
+    closeAndResetHistory();
+  }, [closeAndResetHistory]);
 
   // Don't render on the advisory page
   if (isAdvisoryPage) return null;
@@ -169,7 +171,7 @@ export function AdvisoryPanel() {
         <AdvisoryPanelHeader
           onToggleHistory={handleToggleHistory}
           onNewConversation={handleNewConversation}
-          onClose={close}
+          onClose={closeAndResetHistory}
           historyOpen={historyOpen}
         />
 

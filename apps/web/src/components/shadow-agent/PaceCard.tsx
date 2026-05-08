@@ -61,7 +61,14 @@ export function PaceCard({
   const isDangerous = trustLevel === "always_propose";
   const isDoubleConfirm = trustLevel === "double_confirm";
 
-  const [state, setState] = useState<CardState>("preview");
+  /* `isDangerous` is stable per PaceCard mount: each new shadow response
+   * remounts a fresh component (CommandSurface conditionally renders
+   * <PaceCard /> off the response.session_id), so lazy-init based on
+   * isDangerous is sufficient — no remount-arming useEffect needed.
+   * See workspaces/shard-d-lint/01-analysis/04-redteam-round-1.md F6. */
+  const [state, setState] = useState<CardState>(() =>
+    isDangerous ? "cooldown" : "preview",
+  );
   const [steps, setSteps] = useState<PaceStep[]>(session?.steps ?? []);
   const [resultMessage, setResultMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -69,12 +76,10 @@ export function PaceCard({
     isDangerous ? COOLDOWN_MS / 1000 : 0,
   );
 
-  // ── Cooldown timer for dangerous actions ────────────────
+  // ── Cooldown timer ──────────────────────────────────────
+  // Runs only the interval; lazy-init above set the initial state.
   useEffect(() => {
-    if (!isDangerous || state !== "preview") return;
-
-    setState("cooldown");
-    setCooldownRemaining(COOLDOWN_MS / 1000);
+    if (state !== "cooldown") return;
 
     const interval = setInterval(() => {
       setCooldownRemaining((prev) => {
@@ -88,7 +93,7 @@ export function PaceCard({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isDangerous]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state]);
 
   // ── Confirm handler ─────────────────────────────────────
   const handleConfirm = useCallback(async () => {
