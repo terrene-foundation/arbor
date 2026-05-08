@@ -81,6 +81,10 @@ export interface EmployeeDetail {
   probation_months: number;
   probation_end_date: string;
   confirmation_status: string;
+  /* Audit timestamp — DataFlow auto-managed, used as the remount key for
+   * tab forms so post-save refetch produces a fresh form state without a
+   * useEffect-based form reset (S1a F1, see employees/[id]/page.tsx). */
+  updated_at?: string;
 }
 
 export interface SalaryComponent {
