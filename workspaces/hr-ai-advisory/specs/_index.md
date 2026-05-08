@@ -7,7 +7,7 @@ This is a **skeleton index covering the as-built system** — Arbor M01-M59 ship
 The detailed sources of authority remain:
 
 - `.claude/skills/project/SKILL.md` — 18 project skills grouped by domain (most authoritative for as-built behavior)
-- `.claude/skills/project/*.md` — per-domain knowledge (advisory safety chain, ollama-byok-provider, k8s-staging-deploy, etc.)
+- `.claude/skills/project/*.md` — per-domain knowledge (advisory safety chain, ollama-byok-provider, k8s-deploy, etc.)
 - `.claude/agents/project/*.md` — domain agent specifications
 - `memory/MEMORY.md` — institutional knowledge across sessions
 - `briefs/` — original product briefs (under `workspaces/hr-ai-advisory/briefs/` if present)
@@ -86,12 +86,11 @@ Per `rules/specs-authority.md` MUST 2: organize by domain ontology, not COC proc
 
 ### Production Operations
 
-| File                   | Domain | Status      | Description                                                                                                 |
-| ---------------------- | ------ | ----------- | ----------------------------------------------------------------------------------------------------------- |
-| `deploy-staging.md`    | Ops    | placeholder | tag → GH Actions → Docker Hub → jumper kubectl rollout (see `.claude/skills/project/k8s-staging-deploy.md`) |
-| `deploy-production.md` | Ops    | placeholder | GCE arbor-prod (asia-southeast1-b); rsync via SSH key + docker compose rebuild                              |
-| `health-probes.md`     | Ops    | placeholder | `/health` with DB probe (PR #24); 503 on DB unreachable                                                     |
-| `load-testing.md`      | Ops    | placeholder | locust + mock LLM server; 4 user classes; weighted traffic mix                                              |
+| File               | Domain | Status      | Description                                                                                                                                                                                                            |
+| ------------------ | ------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy.md`        | Ops    | placeholder | Single env: `arbor.aitelab.net` (DGX K8s) — tag → GH Actions → Docker Hub → ttyd jumper at `arbordev.aitelab.net` → `kubectl set image`. See `.claude/skills/project/k8s-deploy.md` and `deploy/deployment-config.md`. |
+| `health-probes.md` | Ops    | placeholder | `/health` with DB probe (PR #24); 503 on DB unreachable                                                                                                                                                                |
+| `load-testing.md`  | Ops    | placeholder | locust + mock LLM server; 4 user classes; weighted traffic mix                                                                                                                                                         |
 
 ## Cross-domain invariants (must hold in every spec)
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from playwright.sync_api import sync_playwright, Page, expect
 
-BASE_URL = os.environ.get("ARBOR_URL", "https://arbor.terrene.foundation")
+BASE_URL = os.environ.get("ARBOR_URL", "https://arbor.aitelab.net")
 EMAIL = "test@arbor.dev"
 PASSWORD = "TestPass2026"
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"

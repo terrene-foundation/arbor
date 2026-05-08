@@ -29,28 +29,13 @@ That's it. Arbor's advisory queries will now route through your local Ollama.
 
 ## Deploying a pre-built Arbor release (no source needed)
 
-If you don't have the Arbor source checked out — e.g. you're a company deploying a tagged release on your own infrastructure, or your dev environment cannot build on Kubernetes — you can run Arbor entirely from pre-built Docker Hub images:
+Pre-built backend + frontend images are published to Docker Hub on every `v*` tag at `terrenefoundation/arbor-backend:<X.Y.Z>` and `terrenefoundation/arbor-frontend:<X.Y.Z>` (multi-arch — `linux/amd64` + `linux/arm64`). Pull them and run them on whatever orchestrator suits your infra.
 
-```bash
-# 1. Grab the deploy/docker-compose.prod.yml and deploy/Caddyfile from the release tag
-curl -O https://raw.githubusercontent.com/terrene-foundation/arbor/v0.4.0/deploy/docker-compose.prod.yml
-curl -O https://raw.githubusercontent.com/terrene-foundation/arbor/v0.4.0/deploy/Caddyfile
+The Foundation's reference deploy is Kubernetes — see `deploy/deployment-config.md` for the manifest layout, namespace conventions, ingress wiring, and the in-cluster `arbor-jumper` rollout pattern. If you want a single-host docker-run pattern, you'll need to assemble compose / systemd / equivalent yourself; arbor does not ship a docker-compose stack.
 
-# 2. Create .env.prod with your config (see .env.production.template in the release)
-# Include the Ollama block from the TL;DR above.
+The images themselves are runtime-complete: backend exposes `:8000` (FastAPI), frontend exposes `:3000` (Next.js standalone). Both expect the env-var surface documented in `deploy/deployment-config.md` § Environment Variables — `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET_KEY`, `LLM_KEY_ENCRYPTION_KEY`, plus the optional Ollama / BYOK / integration vars.
 
-# 3. Pull the pre-built images and start
-ARBOR_VERSION=0.4.0 docker compose -f docker-compose.prod.yml --env-file .env.prod pull backend frontend
-ARBOR_VERSION=0.4.0 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
-
-# 4. Verify
-docker ps --format 'table {{.Names}}\t{{.Status}}'
-curl -sf http://localhost:8000/health
-```
-
-Arbor's `deploy/ship.sh <version>` script automates steps 1-4 against a remote GCE instance via `gcloud compute ssh` — use it if you have the full repo checked out.
-
-**This path never invokes a build command.** The images on Docker Hub are multi-arch (`linux/amd64` and `linux/arm64`), so they work on x86 servers, Apple Silicon dev machines, and ARM production nodes alike.
+**This path never invokes a build command.** Pull the images, wire env, run.
 
 ## Why two models?
 

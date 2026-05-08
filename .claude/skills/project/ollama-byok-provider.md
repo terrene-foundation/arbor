@@ -107,7 +107,7 @@ class EmbeddingPipeline:
 - Unreachable Ollama raises with an actionable message (no silent None-return)
 - `mxbai-embed-large` is the ONLY supported Ollama embedding model in v0.4.0 — other 1024-dim models (`bge-large-en-v1.5`, `snowflake-arctic-embed`, `nomic-embed-text`) are in the `OLLAMA_EMBEDDING_MODELS` allowlist but not actively validated
 
-### Vector dim migration (one-time, already complete on arbor-prod)
+### Vector dim migration (one-time, already complete on the live cluster)
 
 `scripts/migrate_kb_to_1024_dim.py` — idempotent script that migrates the `provisions.embedding` column from 1536-dim to 1024-dim. Uses `pg_attribute.format_type` (NOT `information_schema.udt_name` which can't distinguish dims). Dumps JSONL.gz backup with SHA-256 checksum before any DROP. Captures the existing pgvector index definition from `pg_indexes` and replays it after the column recreate. See `docs/migrations/embedding-1024.md` for the runbook.
 

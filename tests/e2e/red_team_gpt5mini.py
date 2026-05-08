@@ -21,7 +21,7 @@ from typing import Optional
 
 import requests
 
-BASE_URL = os.environ.get("ARBOR_URL", "https://arbor.terrene.foundation")
+BASE_URL = os.environ.get("ARBOR_URL", "https://arbor.aitelab.net")
 EMAIL = "test@arbor.dev"
 PASSWORD = "TestPass2026"
 

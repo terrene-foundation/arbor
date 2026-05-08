@@ -2,7 +2,7 @@
 /**
  * Red Team: Browser UI Advisory Tests via Playwright
  *
- * Runs all 7 tests through the actual browser UI at arbor.terrene.foundation,
+ * Runs all 7 tests through the actual browser UI at arbor.aitelab.net,
  * taking screenshots at each step. Test 5 (multi-domain) runs 3 times for
  * intermittency checking.
  *
@@ -13,7 +13,7 @@ import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
 
-const BASE_URL = process.env.ARBOR_URL || "https://arbor.terrene.foundation";
+const BASE_URL = process.env.ARBOR_URL || "https://arbor.aitelab.net";
 const EMAIL = "test@arbor.dev";
 const PASSWORD = "TestPass2026";
 const SCREENSHOT_DIR = path.resolve("tests/e2e/screenshots/redteam-browser");
