@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import clsx from "clsx";
 import { NavigationSidebar } from "./NavigationSidebar";
 import { TopBar } from "./TopBar";
@@ -11,23 +11,33 @@ export interface AppShellProps {
   children: React.ReactNode;
 }
 
-export function AppShell({ children }: AppShellProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+function getInitialCollapsed(): boolean {
+  /* SSR-safe: lazy-init reads localStorage on the client only.
+   * Combined with the `mounted` skeleton gate below, the server-rendered
+   * and client first-render outputs are both the skeleton — so this
+   * client-only value is only consumed after hydration completes. */
+  if (typeof window === "undefined") return false;
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored !== null) return stored === "true";
+  return window.innerWidth >= 768 && window.innerWidth < 1024;
+}
 
-  /* Hydration-safe: read localStorage and set initial state after mount */
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored !== null) {
-      setCollapsed(stored === "true");
-    } else {
-      /* Default based on viewport width */
-      const isTablet = window.innerWidth >= 768 && window.innerWidth < 1024;
-      setCollapsed(isTablet);
-    }
-    setMounted(true);
-  }, []);
+/* `useSyncExternalStore` lets the mounted flag flip from `false` (SSR
+ * snapshot) to `true` (client snapshot) without a `setState`-in-effect.
+ * React re-renders post-hydration with the client snapshot — same UX as
+ * the previous `useEffect(() => setMounted(true), [])` pattern, lint-clean. */
+const subscribeMounted = () => () => {};
+const getMountedClientSnapshot = () => true;
+const getMountedServerSnapshot = () => false;
+
+export function AppShell({ children }: AppShellProps) {
+  const [collapsed, setCollapsed] = useState<boolean>(getInitialCollapsed);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeMounted,
+    getMountedClientSnapshot,
+    getMountedServerSnapshot,
+  );
 
   /* Respond to resize: auto-collapse on tablet, expand on desktop */
   useEffect(() => {
