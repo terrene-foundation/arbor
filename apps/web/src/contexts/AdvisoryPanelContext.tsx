@@ -93,7 +93,7 @@ export function AdvisoryPanelProvider({ children }: { children: ReactNode }) {
    * open. Action-driven alternatives (deriving isOpen from rawIsOpen +
    * isAdvisoryPage) regress the "panel does not snap back open when leaving
    * advisory" UX (see workspaces/shard-d-lint/01-analysis/04-redteam-round-1.md F7).
-   * Tracking issue: TBD-AdvisoryPanelContext-route-sync. */
+   * Tracking: terrene-foundation/arbor#33. */
   useEffect(() => {
     if (isAdvisoryPage && isOpen) {
       // eslint-disable-next-line react-hooks/set-state-in-effect

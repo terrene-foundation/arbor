@@ -233,6 +233,7 @@ export function useObservation(): UseObservationReturn {
   // exception — pathname (route navigation) is the external state being
   // synchronized into the visits log. The rule fires only on the cascading
   // setInsights pattern (now removed via the useMemo above).
+  // Tracking: terrene-foundation/arbor#33.
   useEffect(() => {
     if (!isEnabled) return;
 
