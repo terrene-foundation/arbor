@@ -297,9 +297,16 @@ function OverviewTab({
     : null;
 
   const workPassExpiry = getExpiryBadge(employee.work_pass_expiry);
+  /* `Date.now()` is impure for react-hooks/purity. Capture once at mount via
+   * `useState` initializer: `referenceTimeMs` is stable for the OverviewTab's
+   * lifetime, making the days-left calculation deterministic per render. The
+   * value is stale across long sessions but minute-level accuracy is not
+   * required for a "days remaining" badge on an HR overview card. */
+  const [referenceTimeMs] = useState(() => Date.now());
   const workPassDaysLeft = employee.work_pass_expiry
     ? Math.ceil(
-        (new Date(employee.work_pass_expiry).getTime() - Date.now()) / 86400000,
+        (new Date(employee.work_pass_expiry).getTime() - referenceTimeMs) /
+          86400000,
       )
     : null;
 
@@ -507,15 +514,17 @@ function PersonalTab({
   onSave: (data: Partial<EmployeeDetail>) => Promise<void>;
   isSaving: boolean;
 }) {
+  /* Form-reset on save is achieved via remount: parent renders this tab
+   * with `key={employee.updated_at}`, so each save (which produces a new
+   * updated_at via DataFlow auto-managed timestamps) remounts the tab and
+   * resets form/hasChanges/reveal-toggles to initial state. Replaces the
+   * prior `useEffect(() => { setForm({}); setHasChanges(false); }, [employee])`
+   * which violated react-hooks/set-state-in-effect (Cat D form-reset).
+   * See workspaces/shard-d-lint/01-analysis/04-redteam-round-1.md F1. */
   const [form, setForm] = useState<Partial<EmployeeDetail>>({});
   const [revealNric, setRevealNric] = useState(false);
   const [revealBank, setRevealBank] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-
-  useEffect(() => {
-    setForm({});
-    setHasChanges(false);
-  }, [employee]);
 
   function updateField(key: keyof EmployeeDetail, value: string | number) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -1314,26 +1323,20 @@ function FamilyMembersInline({
 
 function EmploymentTab({
   employee,
-  employeeId,
   isAdmin,
   onSave,
   isSaving,
   onOpenModal,
 }: {
   employee: EmployeeDetail;
-  employeeId: number;
   isAdmin: boolean;
   onSave: (data: Partial<EmployeeDetail>) => Promise<void>;
   isSaving: boolean;
   onOpenModal: (modal: ModalType) => void;
 }) {
+  /* Form-reset via remount (key=employee.updated_at on parent). See PersonalTab. */
   const [form, setForm] = useState<Partial<EmployeeDetail>>({});
   const [hasChanges, setHasChanges] = useState(false);
-
-  useEffect(() => {
-    setForm({});
-    setHasChanges(false);
-  }, [employee]);
 
   function updateField(key: keyof EmployeeDetail, value: string | number) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -1878,13 +1881,9 @@ function StatutoryTab({
   onSave: (data: Partial<EmployeeDetail>) => Promise<void>;
   isSaving: boolean;
 }) {
+  /* Form-reset via remount (key=employee.updated_at on parent). See PersonalTab. */
   const [form, setForm] = useState<Partial<EmployeeDetail>>({});
   const [hasChanges, setHasChanges] = useState(false);
-
-  useEffect(() => {
-    setForm({});
-    setHasChanges(false);
-  }, [employee]);
 
   function updateField(key: keyof EmployeeDetail, value: string | number) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -4697,6 +4696,7 @@ export default function EmployeeDetailPage({
       )}
       {activeTab === "personal" && (
         <PersonalTab
+          key={employee.updated_at ?? employee.id}
           employee={employee}
           isAdmin={isAdmin}
           onSave={handleSaveProfile}
@@ -4705,8 +4705,8 @@ export default function EmployeeDetailPage({
       )}
       {activeTab === "employment" && (
         <EmploymentTab
+          key={employee.updated_at ?? employee.id}
           employee={employee}
-          employeeId={employeeId}
           isAdmin={isAdmin}
           onSave={handleSaveProfile}
           isSaving={isSaving}
@@ -4722,6 +4722,7 @@ export default function EmployeeDetailPage({
       )}
       {activeTab === "statutory" && (
         <StatutoryTab
+          key={employee.updated_at ?? employee.id}
           employee={employee}
           isAdmin={isAdmin}
           onSave={handleSaveProfile}
