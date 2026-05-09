@@ -93,7 +93,6 @@ export async function setupApiRouteInterception(page: Page): Promise<void> {
   await page.route("http://localhost:8000/**", async (route) => {
     const originalUrl = route.request().url();
     const targetUrl = originalUrl.replace("localhost:8000", "localhost:8099");
-    const request = route.request();
 
     try {
       // Fetch from the real backend
