@@ -39,6 +39,7 @@ export interface LeaveType {
   leave_type_name?: string;
   entitlement_days?: number;
   max_days_per_year?: number;
+  gender_restriction?: string;
 }
 
 export interface LeaveApplication {
