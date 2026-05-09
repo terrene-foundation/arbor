@@ -227,7 +227,13 @@ export default function AdvisoryHistoryPage() {
   const [search, setSearch] = useState("");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
 
-  const conversations = data?.conversations ?? [];
+  /* Wrap to stabilize the reference: `data?.conversations ?? []` allocates a
+   * fresh `[]` on every render when data is undefined, defeating downstream
+   * useMemo memoization (react-hooks/exhaustive-deps F17). */
+  const conversations = useMemo(
+    () => data?.conversations ?? [],
+    [data?.conversations],
+  );
 
   /* Filter and sort */
   const filtered = useMemo(() => {

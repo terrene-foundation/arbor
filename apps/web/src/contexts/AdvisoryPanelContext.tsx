@@ -40,6 +40,18 @@ type AdvisoryPanelContextValue = AdvisoryPanelState & AdvisoryPanelAPI;
 
 const ACTIVE_CONV_KEY = "arbor-advisory-active-conv";
 
+function getInitialActiveConversation(): number | null {
+  /* SSR-safe lazy-init: read sessionStorage on the client only. The provider
+   * is a `"use client"` component so the SSR pass returns null; on hydration,
+   * client first render reads the stored value. The persist effect below
+   * keeps storage in sync on subsequent changes. */
+  if (typeof window === "undefined") return null;
+  const stored = sessionStorage.getItem(ACTIVE_CONV_KEY);
+  if (stored === null) return null;
+  const parsed = parseInt(stored, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 /* ── Context ─────────────────────────────────────────────── */
 
 const AdvisoryPanelContext = createContext<AdvisoryPanelContextValue | null>(
@@ -56,19 +68,8 @@ export function AdvisoryPanelProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<
     number | null
-  >(null);
+  >(getInitialActiveConversation);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
-
-  /* Restore active conversation from sessionStorage on mount */
-  useEffect(() => {
-    const stored = sessionStorage.getItem(ACTIVE_CONV_KEY);
-    if (stored !== null) {
-      const parsed = parseInt(stored, 10);
-      if (!Number.isNaN(parsed)) {
-        setActiveConversationId(parsed);
-      }
-    }
-  }, []);
 
   /* Persist active conversation to sessionStorage */
   useEffect(() => {
@@ -79,9 +80,23 @@ export function AdvisoryPanelProvider({ children }: { children: ReactNode }) {
     }
   }, [activeConversationId]);
 
-  /* Auto-close panel when navigating to /advisory page */
+  /* Auto-close panel when navigating to /advisory page.
+   *
+   * STRUCTURAL EXCEPTION (react-hooks/set-state-in-effect): this effect
+   * synchronizes UI state to an external state change (route navigation).
+   * The lint rule's documented permitted use case is "subscribe for updates
+   * from some external system, calling setState in a callback function when
+   * external state changes" — pathname is exactly that external system. The
+   * exposed API methods (open/toggle/askQuestion) already guard against
+   * setting `isOpen=true` when on advisory; this effect handles the inverse:
+   * resetting to false when the user navigates TO advisory while panel is
+   * open. Action-driven alternatives (deriving isOpen from rawIsOpen +
+   * isAdvisoryPage) regress the "panel does not snap back open when leaving
+   * advisory" UX (see workspaces/shard-d-lint/01-analysis/04-redteam-round-1.md F7).
+   * Tracking: terrene-foundation/arbor#33. */
   useEffect(() => {
     if (isAdvisoryPage && isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsOpen(false);
     }
   }, [isAdvisoryPage, isOpen]);

@@ -114,14 +114,25 @@ function DonutChart({
     );
   }
 
-  // Build conic-gradient segments
-  let accumulated = 0;
-  const segments = items.map((item) => {
-    const start = accumulated;
-    const pct = (item.value / total) * 100;
-    accumulated += pct;
-    return `${item.color} ${start}% ${accumulated}%`;
-  });
+  // Build conic-gradient segments via reduce (no closure mutation across map
+  // iterations — react-hooks/immutability flagged the prior `accumulated += pct`
+  // in `.map()` as render-time mutation of a closure variable, which is
+  // semantically the same antipattern as mutating state in render).
+  const { segments } = items.reduce<{
+    accumulated: number;
+    segments: string[];
+  }>(
+    (acc, item) => {
+      const start = acc.accumulated;
+      const pct = (item.value / total) * 100;
+      const accumulated = start + pct;
+      return {
+        accumulated,
+        segments: [...acc.segments, `${item.color} ${start}% ${accumulated}%`],
+      };
+    },
+    { accumulated: 0, segments: [] },
+  );
   const gradient = `conic-gradient(${segments.join(", ")})`;
 
   return (

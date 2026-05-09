@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePathname } from "next/navigation";
 
 /* -- Types --------------------------------------------------------- */
@@ -208,17 +208,32 @@ async function reportObservation(page: string): Promise<void> {
  */
 export function useObservation(): UseObservationReturn {
   const pathname = usePathname();
-  const [visits, setVisits] = useState<PageVisit[]>([]);
-  const [isEnabled, setIsEnabledState] = useState(true);
-  const [insights, setInsights] = useState<ObservationInsight[]>([]);
+  /* Lazy-init from storage (SSR-guarded inside helpers) — replaces the prior
+   * `useEffect(() => { setVisits(...); setIsEnabledState(...) }, [])` which
+   * violated react-hooks/set-state-in-effect (Cat B hydration pattern). */
+  const [visits, setVisits] = useState<PageVisit[]>(getStoredVisits);
+  const [isEnabled, setIsEnabledState] = useState(getEnabledState);
 
-  // Load initial state
-  useEffect(() => {
-    setVisits(getStoredVisits());
-    setIsEnabledState(getEnabledState());
-  }, []);
+  /* `insights` is derived from (visits, isEnabled) — converting from useState
+   * to useMemo eliminates the cascading `setInsights(...)` setState that the
+   * prior implementation fired inside `setVisits((prev) => {...})`. The memo
+   * gates on `isEnabled` so disabling clears insights without an explicit
+   * setter call; clearing visits via `clearAll` returns `[]` automatically.
+   * See workspaces/shard-d-lint/01-analysis/04-redteam-round-1.md F5. */
+  const insights = useMemo<ObservationInsight[]>(
+    () =>
+      isEnabled && visits.length >= MIN_VISITS_FOR_INSIGHT_RENDER
+        ? generateInsights(visits)
+        : [],
+    [visits, isEnabled],
+  );
 
-  // Record page visit on navigation and report to backend
+  // Record page visit on navigation and report to backend.
+  // The setState here is allowed by the rule's "subscribe to external system"
+  // exception — pathname (route navigation) is the external state being
+  // synchronized into the visits log. The rule fires only on the cascading
+  // setInsights pattern (now removed via the useMemo above).
+  // Tracking: terrene-foundation/arbor#33.
   useEffect(() => {
     if (!isEnabled) return;
 
@@ -227,15 +242,10 @@ export function useObservation(): UseObservationReturn {
       timestamp: Date.now(),
     };
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setVisits((prev) => {
       const updated = [...prev, newVisit];
       storeVisits(updated);
-
-      // Only generate insights after 5+ total page views
-      if (updated.length >= 5) {
-        setInsights(generateInsights(updated));
-      }
-
       return updated;
     });
 
@@ -248,14 +258,10 @@ export function useObservation(): UseObservationReturn {
     if (typeof window !== "undefined") {
       localStorage.setItem(STORAGE_KEY_ENABLED, String(value));
     }
-    if (!value) {
-      setInsights([]);
-    }
   }, []);
 
   const clearAll = useCallback(() => {
     setVisits([]);
-    setInsights([]);
     if (typeof window !== "undefined") {
       sessionStorage.removeItem(STORAGE_KEY_VISITS);
     }
@@ -269,3 +275,6 @@ export function useObservation(): UseObservationReturn {
     clearAll,
   };
 }
+
+/* Threshold matching the prior cascade gate (visits.length >= 5). */
+const MIN_VISITS_FOR_INSIGHT_RENDER = 5;

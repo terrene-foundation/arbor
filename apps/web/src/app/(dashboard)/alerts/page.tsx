@@ -153,7 +153,10 @@ export default function AlertsPage() {
   const [calendarMonth, setCalendarMonth] = useState(2); // March (0-indexed)
   const [calendarYear, setCalendarYear] = useState(2026);
 
-  const alerts = data?.alerts ?? [];
+  /* Wrap to stabilize the reference: `data?.alerts ?? []` allocates a fresh
+   * `[]` on every render when data is undefined, defeating the downstream
+   * useMemo memoization (react-hooks/exhaustive-deps F17). */
+  const alerts = useMemo(() => data?.alerts ?? [], [data?.alerts]);
 
   /* ── Derived state ─────────────────────────────────────── */
 
