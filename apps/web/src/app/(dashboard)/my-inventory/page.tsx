@@ -9,7 +9,6 @@ import {
   toast,
 } from "@/components/design-system";
 import { Package, Plus, CheckCircle, X } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
 import {
   inventoryApi,
   type InventoryItem,
@@ -156,8 +155,9 @@ function RequestItemModal({
 /* ── Page ─────────────────────────────────────────────────── */
 
 export default function MyInventoryPage() {
-  const { user } = useAuth();
-
+  // Inventory endpoints are JWT-scoped server-side (`/inventory/items/me`,
+  // `/inventory/requests` filters by current user). No `user` from useAuth()
+  // is needed in this component.
   const [myItems, setMyItems] = useState<InventoryItem[]>([]);
   const [myRequests, setMyRequests] = useState<InventoryRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);

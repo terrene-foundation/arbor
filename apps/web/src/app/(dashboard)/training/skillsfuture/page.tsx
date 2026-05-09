@@ -44,7 +44,11 @@ const TOPIC_OPTIONS = [
 ];
 
 const DURATION_OPTIONS = ["", "1-day", "2-3 days", "1 week", "2+ weeks"];
-const FUNDING_OPTIONS = ["", "sfc-eligible", "grant-eligible"];
+const FUNDING_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Any Funding" },
+  { value: "sfc-eligible", label: "SFC Eligible" },
+  { value: "grant-eligible", label: "Grant Eligible" },
+];
 
 function SearchBar({
   filters,
@@ -156,9 +160,11 @@ function SearchBar({
                 border-[var(--color-surface-input-border)]
                 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)]"
             >
-              <option value="">Any Funding</option>
-              <option value="sfc-eligible">SFC Eligible</option>
-              <option value="grant-eligible">Grant Eligible</option>
+              {FUNDING_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
         </div>

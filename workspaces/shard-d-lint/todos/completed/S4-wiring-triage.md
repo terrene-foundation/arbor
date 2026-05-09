@@ -67,3 +67,45 @@ S4 owns ~6 files in the shadow-agent surface (`src/components/shadow-agent/{Arbo
 ## Definition of Done
 
 S4 PR merged; 9 Type E warnings resolved via the three-way protocol (zero `eslint-disable`); tracking issues filed for (c) cases; restored UI for (b) cases verified by tests; brief criterion 2 closed.
+
+## Verification (2026-05-09)
+
+**Status: COMPLETE** — all 13 enumerated Type E warnings resolved, 0 `eslint-disable` added.
+
+### Per-case outcomes
+
+| #   | File:line                                        | Symbol               | Outcome      | Commit / Issue                                                                |
+| --- | ------------------------------------------------ | -------------------- | ------------ | ----------------------------------------------------------------------------- |
+| 1   | `(dashboard)/employees/[id]/page.tsx:1317`       | `employeeId`         | (n/a)        | Already resolved by S1a (`159c88a` baseline absorbed)                         |
+| 2   | `(dashboard)/my-inventory/page.tsx:159`          | `user`               | (a) drop     | `c66d18b`                                                                     |
+| 3   | `(dashboard)/my-profile/page.tsx:199`            | `user`               | (a) drop     | `c66d18b`                                                                     |
+| 4   | `(dashboard)/my-profile/page.tsx:207`            | `payrollRequired`    | (b) restore  | `c595f6a` (test: `test_s4_my_profile_payroll_banner.spec.tsx`)                |
+| 5   | `(dashboard)/my-timesheets/page.tsx:239`         | `user`               | (a) drop     | `c66d18b`                                                                     |
+| 6   | `(dashboard)/recruitment/page.tsx:51`            | `STAGE_STYLES`       | (b) restore  | `c595f6a` (test: `test_s4_recruitment_stage_styles.spec.tsx`)                 |
+| 7   | `(dashboard)/reports/page.tsx:352`               | `isAdmin`            | (c) tracking | `a4b6ef3` → [arbor#39](https://github.com/terrene-foundation/arbor/issues/39) |
+| 8   | `(dashboard)/training/skillsfuture/page.tsx:48`  | `FUNDING_OPTIONS`    | (b) restore  | `c595f6a` (test: `test_s4_skillsfuture_funding.spec.tsx`)                     |
+| 9   | `components/advisory/EscalationDialog.tsx:25`    | `URGENCY_TIMEFRAMES` | (b) restore  | `c595f6a` (test: `test_s4_escalation_timeframe.spec.tsx`)                     |
+| 10  | `components/advisory/SystemMessage.tsx:134`      | `messageId`          | (c) tracking | `a4b6ef3` → [arbor#40](https://github.com/terrene-foundation/arbor/issues/40) |
+| 11  | `components/shadow-agent/CommandSurface.tsx:558` | `sid`                | (a) drop     | `c66d18b`                                                                     |
+| 12  | `components/shadow-agent/ShadowMargin.tsx:62`    | `onOpenHistory`      | (b) restore  | `c595f6a` (test: `test_s4_shadow_margin_history.spec.tsx`)                    |
+| 13  | `components/shell/NavigationSidebar.tsx:496`     | `collapsed`          | (b) restore  | `c595f6a` (test: `test_s4_navigation_collapsed.spec.tsx`)                     |
+
+### Aggregate counts
+
+- 5 (a) drops + 6 (b) restorations + 2 (c) tracking-issue dispositions + 1 (n/a) verify-only = 14 cases (13 enumerated + 1 already-resolved)
+- 6 Tier-2 regression tests added (11 individual test cases pinning re-wired DOM)
+- 2 GitHub issues filed against `terrene-foundation/arbor` (#39, #40)
+
+### Acceptance gates
+
+- `cd apps/web && npx eslint .` → 16 problems remaining (12 errors + 4 warnings); ALL S4-owned Type E warnings cleared. Remaining 4 warnings (`formatCurrency`, `ninetyDaysMs`, `cpfButton`, `request`) are parallel S3 territory.
+- `npx vitest run` → 17 files / 84 tests pass.
+- `npm run build` → Compiled successfully in 2.4s.
+- `git diff main..HEAD | grep eslint-disable` → empty (zero `// eslint-disable` added).
+- Tracking-issue journal entry: `journal/0010-DECISION-s4-wiring-triage.md`.
+
+### Lint delta
+
+- Pre-S4 baseline: 28 problems (12 errors / 16 warnings)
+- Post-S4: 16 problems (12 errors / 4 warnings)
+- S4 cleared: 12 warnings (the 13th was already absorbed by S1a)

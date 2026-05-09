@@ -634,12 +634,16 @@ function CandidatePipeline({
     <div className="flex gap-3 overflow-x-auto pb-2">
       {PIPELINE_STAGES.map((stage) => {
         const stageCandidates = candidates.filter((c) => c.stage === stage);
+        const stageStyle = STAGE_STYLES[stage] ?? STAGE_STYLES.new ?? "";
         return (
           <div key={stage} className="min-w-[220px] flex-1">
             <div className="flex items-center gap-2 mb-2">
-              <h3 className="text-xs font-semibold text-[var(--color-gray-500)] uppercase tracking-wider">
+              <span
+                data-testid={`stage-header-${stage}`}
+                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${stageStyle}`}
+              >
                 {stage.charAt(0).toUpperCase() + stage.slice(1)}
-              </h3>
+              </span>
               <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-[var(--color-gray-200)] text-[10px] font-bold text-[var(--color-gray-600)]">
                 {stageCandidates.length}
               </span>

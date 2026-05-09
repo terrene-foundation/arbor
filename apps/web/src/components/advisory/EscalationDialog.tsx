@@ -212,6 +212,7 @@ export function EscalationDialog({
             value={urgency}
             onChange={(e) => setUrgency(e.target.value as EscalationUrgency)}
             options={URGENCY_OPTIONS}
+            helperText={`Expected specialist response: ${URGENCY_TIMEFRAMES[urgency]}.`}
           />
 
           {/* Preferred contact method */}
