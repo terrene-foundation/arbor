@@ -65,7 +65,7 @@ export function useCreateProfile() {
     CompanyProfileCreateRequest
   >({
     mutationFn: (data) => profileApi.create(data),
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: profileKeys.all });
     },
   });

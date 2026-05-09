@@ -8,7 +8,6 @@ import {
   TrendingUp,
   BookOpen,
   AlertCircle,
-  Loader2,
 } from "lucide-react";
 import { useAdminMetrics } from "@/hooks/api/useAdmin";
 

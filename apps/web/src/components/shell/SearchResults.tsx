@@ -25,6 +25,9 @@ interface QuickAction {
 }
 
 export interface SearchResultsProps {
+  /** DOM id forwarded to the listbox container so the parent's
+   * `role="combobox"` input can carry `aria-controls={id}`. */
+  id?: string;
   query: string;
   onClose: () => void;
   onSelect: (path: string) => void;
@@ -83,6 +86,7 @@ const MAX_PER_SECTION = 3;
 /* ── Component ───────────────────────────────────────────────── */
 
 export function SearchResults({
+  id,
   query,
   onClose,
   onSelect,
@@ -224,6 +228,7 @@ export function SearchResults({
 
   return (
     <div
+      id={id}
       ref={containerRef}
       className={clsx(
         "absolute left-0 right-0 top-full mt-1 z-50",

@@ -1,7 +1,7 @@
 /**
  * Diagnostic test: verify route interception and auth flow
  */
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 
 const SCREENSHOT_DIR = "tests/e2e/screenshots";
 

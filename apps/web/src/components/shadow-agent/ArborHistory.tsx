@@ -1,14 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  Clock,
-  Check,
-  X,
-  RotateCcw,
-  ChevronRight,
-  Loader2,
-} from "lucide-react";
+import { Clock, Check, X, ChevronRight, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import {
   shadowApi,

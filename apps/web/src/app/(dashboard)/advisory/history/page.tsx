@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
-  AppCard,
   AppButton,
   RiskTierBadge,
   LoadingState,

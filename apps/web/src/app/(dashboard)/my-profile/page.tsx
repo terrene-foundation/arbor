@@ -215,7 +215,7 @@ export default function MyProfilePage() {
     try {
       const data = await apiClient.get<ProfileData>("/employees/me");
       setProfile(data);
-    } catch (err) {
+    } catch {
       setError("Unable to load your profile. Please try again.");
     } finally {
       setLoading(false);

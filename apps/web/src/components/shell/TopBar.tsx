@@ -225,6 +225,7 @@ export function TopBar({ onMenuToggle, notificationCount = 0 }: TopBarProps) {
                   }}
                   role="combobox"
                   aria-expanded={showSearchResults}
+                  aria-controls="topbar-search-results"
                   aria-haspopup="listbox"
                   aria-autocomplete="list"
                 />
@@ -232,6 +233,7 @@ export function TopBar({ onMenuToggle, notificationCount = 0 }: TopBarProps) {
                 {/* Search results dropdown */}
                 {showSearchResults && (
                   <SearchResults
+                    id="topbar-search-results"
                     query={searchQuery}
                     onClose={handleSearchResultsClose}
                     onSelect={handleSearchSelect}

@@ -113,7 +113,7 @@ export async function setupApiRouteInterception(page: Page): Promise<void> {
         headers,
         body,
       });
-    } catch (err) {
+    } catch {
       // Fallback: just continue with URL rewrite
       await route.continue({ url: targetUrl });
     }

@@ -15,7 +15,6 @@ import {
   AppCard,
   AppButton,
   StepIndicator,
-  LoadingState,
   AlertBanner,
   toast,
 } from "@/components/design-system";
@@ -23,7 +22,6 @@ import { useImportPreview, useImportConfirm } from "@/hooks/api";
 import type {
   ImportSource,
   ImportPreviewResponse,
-  FieldMapping,
 } from "@/services/api/integrations";
 
 /* ── Constants ───────────────────────────────────────────── */

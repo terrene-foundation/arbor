@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Mic, Send, ArrowRight } from "lucide-react";
 import { AppButton } from "@/components/design-system/AppButton";
-import { AppCard } from "@/components/design-system/AppCard";
 import type { CompanyProfileData } from "./CompanyProfileStep";
 
 interface FirstQuestionStepProps {

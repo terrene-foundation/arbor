@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AppButton, AppCard, AppInput } from "@/components/design-system";
+import { AppCard, AppInput } from "@/components/design-system";
 import { ThumbsDown, ThumbsUp, AlertCircle } from "lucide-react";
 import { useAdminFeedbackSummary } from "@/hooks/api/useAdmin";
 
