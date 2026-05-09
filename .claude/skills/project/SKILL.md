@@ -50,3 +50,9 @@ Project-specific skills for Arbor (HRIS + AI advisory for SG SMEs). Use this ind
 | File                                       | When to use                                                        |
 | ------------------------------------------ | ------------------------------------------------------------------ |
 | [mcp-integrations.md](mcp-integrations.md) | 5 MCP servers, 38 connectors, circuit breakers, idempotency, sagas |
+
+## Frontend (apps/web)
+
+| File                                                       | When to use                                                                                                                            |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| [frontend-data-fetching.md](frontend-data-fetching.md)     | Adding/migrating data-fetch logic. TanStack Query patterns, per-hook staleTime decisions, key= for refetch flows, useEffect antipatterns |

@@ -1,0 +1,47 @@
+name: Lint web
+
+# Structural defense for Shard D brief criterion 1: `npx eslint .` exits 0/0.
+# This workflow gates every PR + push-to-main on the apps/web ESLint surface
+# remaining clean. Without this gate, future agents could silently re-introduce
+# lint failures, undoing the Shard D cleanup.
+#
+# Tracking: workspaces/shard-d-lint/ (Shard D), redteam F25.
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/lint-web.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/lint-web.yml"
+
+jobs:
+  lint:
+    name: ESLint apps/web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint (fails on any error or warning)
+        run: npx eslint . --max-warnings 0
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
