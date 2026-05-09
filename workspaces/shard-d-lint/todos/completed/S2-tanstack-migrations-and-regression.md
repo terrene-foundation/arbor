@@ -74,3 +74,66 @@ S2 owns ~6 pages exclusively (after S1 merges its parts on shared files): `signu
 ## Definition of Done
 
 S2 PR merged; 6 fetches migrated; per-page regression tests green against canned fixtures; per-hook staleTime decisions justified inline; no behavioral regression observable through the regression suite. Brief criterion 4 satisfied via the regression suite, not manual playwright.
+
+## Verification
+
+### Lint delta
+
+| Stage           | Errors      | Warnings    | Δ Errors | Δ Warnings |
+| --------------- | ----------- | ----------- | -------- | ---------- |
+| Before S1a      | 31          | 52          | —        | —          |
+| After S1a + S1b | 18          | 22          | -13      | -30        |
+| **After S2**    | **12 (-6)** | **16 (-6)** | **-19**  | **-36**    |
+
+The 6 errors removed by S2 are exactly the `react-hooks/set-state-in-effect`
+violations on the 6 migrated pages. The 6 warnings removed are the analytics
+quartet (F12 cascade) plus AlertBanner + Download dead imports.
+
+### Acceptance gates
+
+- [x] `cd apps/web && npx eslint . 2>&1 | tail -3` — 6 errors removed (12 remain, all S3-owned)
+- [x] `npx tsc --noEmit` — clean
+- [x] `npm run test -- --run` — 73 tests pass (43 prior + 30 new regression)
+- [x] `npm run build` — Compiled successfully in 2.4s; 57 routes generated
+- [x] No new `// eslint-disable-*` comments
+- [x] No `as any` / `as unknown as` / `// @ts-ignore` introduced
+
+### Hooks added
+
+| Hook                                                              | File                                  |
+| ----------------------------------------------------------------- | ------------------------------------- |
+| `useDashboardCompliance`, `useDashboardMetrics`                   | `src/hooks/api/useDashboard.ts`       |
+| `useAnalyticsWorkforce/Compliance/Metrics/QueryPatterns/Feedback/MonthlyReport` | `src/hooks/api/useAnalytics.ts`       |
+| `useEmployeeForPicker`                                            | `src/hooks/api/useEmployees.ts`       |
+| `useInviteValidation`                                             | `src/hooks/api/useAuth.ts`            |
+| `useDocumentTemplates`, `useDocumentTemplate` (extended w/ staleTime) | `src/hooks/api/useDocuments.ts`       |
+
+### Regression specs added
+
+`apps/web/tests/regression/`:
+
+- `_helpers.tsx` — `renderWithQueryClient` + `neverResolves` utilities
+- `test_migration_documents.spec.tsx` (4 tests)
+- `test_migration_documents_preview.spec.tsx` (4 tests, F2 invalid-id branch)
+- `test_migration_signup.spec.tsx` (7 tests, F21 keyword-sniff bridge)
+- `test_migration_dashboard.spec.tsx` (5 tests)
+- `test_migration_analytics.spec.tsx` (5 tests)
+- `test_migration_employee_picker.spec.tsx` (5 tests)
+
+Test tier choice: all Tier 2 (Vitest + Testing Library + service-layer
+vi.mock). No Tier 3 Playwright was needed; the regression suite runs in
+<1 second wall-clock combined.
+
+### Backend tracking issue
+
+F21 `error.message` keyword sniff bridge filed at
+[terrene-foundation/arbor#36](https://github.com/terrene-foundation/arbor/issues/36).
+The hook's docstring + signup-page comment both reference #36.
+
+### Commit SHAs
+
+- `9084304` — feat(web): TanStack Query hooks for migrated pages
+- `f320eed` — fix(web): migrate 6 fetch-on-mount pages to TanStack Query
+- `ea6b6e0` — test(web): per-page Tier-2 regression suite
+
+Branch: `feat/shard-d-s2-tanstack`. Ready for review and admin-merge.
