@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useAuth } from "@/contexts/AuthContext";
 import { AppCard } from "@/components/design-system";
 import { apiClient } from "@/services/api/client";
 import {
@@ -196,7 +195,9 @@ function Field({
 /* ── Main page ─────────────────────────────────────────────── */
 
 export default function MyProfilePage() {
-  const { user } = useAuth();
+  // Profile data is fetched from `/employees/me` (JWT-scoped). The auth
+  // context's `user` (a separate User record) is redundant here — the
+  // `ProfileData` payload below carries everything the UI renders.
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

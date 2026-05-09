@@ -9,7 +9,6 @@ import {
   toast,
 } from "@/components/design-system";
 import { Timer, Plus, Send, X } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
 import {
   projectsApi,
   type TimesheetEntry,
@@ -236,8 +235,8 @@ function AddEntryModal({
 /* ── Page ─────────────────────────────────────────────────── */
 
 export default function MyTimesheetsPage() {
-  const { user } = useAuth();
-
+  // Timesheet endpoints are JWT-scoped server-side
+  // (`/projects/timesheets/me`). No `user` from useAuth() is needed.
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);

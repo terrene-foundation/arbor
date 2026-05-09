@@ -555,7 +555,12 @@ export function CommandSurface({
                     response={shadowResponse}
                     onConfirm={handlePaceConfirm}
                     onCancel={handlePaceCancel}
-                    onRetry={(sid) => {
+                    onRetry={() => {
+                      // Retry resubmits the original `query` to
+                      // shadowApi.execute(), which produces a fresh
+                      // session_id. The failed PaceCard's session id is
+                      // intentionally not preserved — a retry is a new
+                      // execution, not a continuation of the failed one.
                       setShadowResponse(null);
                       setConfirmResult(null);
                       handleSubmit(query);
