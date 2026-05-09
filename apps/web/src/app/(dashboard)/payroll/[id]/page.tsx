@@ -43,7 +43,7 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function formatPeriod(start: string, end: string): string {
+function formatPeriod(start: string, _end: string): string {
   const s = new Date(start);
   return s.toLocaleDateString("en-SG", { month: "long", year: "numeric" });
 }

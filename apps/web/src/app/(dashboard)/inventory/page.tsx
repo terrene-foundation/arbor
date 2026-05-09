@@ -9,15 +9,7 @@ import {
   EmptyState,
   toast,
 } from "@/components/design-system";
-import {
-  Package,
-  Plus,
-  MapPin,
-  Tag,
-  ArrowRight,
-  X,
-  UserCheck,
-} from "lucide-react";
+import { Package, Plus, MapPin, Tag, X, UserCheck } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   inventoryApi,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import {
   GraduationCap,
   Search,
@@ -18,7 +18,6 @@ import {
   LoadingState,
   ErrorState,
   EmptyState,
-  toast,
 } from "@/components/design-system";
 import { useSkillsFutureCourses, useGrantCheck } from "@/hooks/api";
 import type { SkillsFutureCourse } from "@/services/api/integrations";

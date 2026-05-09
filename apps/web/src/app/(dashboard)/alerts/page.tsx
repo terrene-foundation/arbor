@@ -15,7 +15,6 @@ import {
   FileText,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   AlertCircle,
 } from "lucide-react";
 import { AppCard, AppButton } from "@/components/design-system";

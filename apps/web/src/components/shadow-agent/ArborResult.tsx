@@ -47,7 +47,7 @@ const MODULE_ICONS: Record<string, React.FC<{ className?: string }>> = {
  */
 export function ArborResult({ response, showUndo = true }: ArborResultProps) {
   const router = useRouter();
-  const module = response.intent?.module ?? "";
+  const targetModule = response.intent?.module ?? "";
   const action = response.intent?.action ?? "";
   const sessionId = response.session_id;
   const isUndoable = response.session?.is_undoable ?? false;
@@ -90,7 +90,7 @@ export function ArborResult({ response, showUndo = true }: ArborResultProps) {
 
   // Extract navigation link from response data
   const navigationRoute = response.data?.navigation as string | undefined;
-  const ModuleIcon = MODULE_ICONS[module] ?? Check;
+  const ModuleIcon = MODULE_ICONS[targetModule] ?? Check;
 
   // Clean message by removing "Arbor: " prefix for display
   const displayMessage = (response.message ?? "").replace(/^Arbor:\s*/i, "");
@@ -119,7 +119,7 @@ export function ArborResult({ response, showUndo = true }: ArborResultProps) {
             <ModuleIcon className="h-3.5 w-3.5 text-white" />
           </div>
           <span className="text-sm font-semibold text-[var(--foreground)]">
-            {success ? "Done" : "Failed"} — {module}.{action}
+            {success ? "Done" : "Failed"} — {targetModule}.{action}
           </span>
         </div>
 

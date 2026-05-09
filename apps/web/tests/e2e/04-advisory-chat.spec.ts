@@ -7,7 +7,7 @@
  * - Are there citations/risk tiers?
  * - Does streaming work?
  */
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 import { setupAuthenticatedSession } from "./helpers/auth.helper";
 
 const SCREENSHOT_DIR = "tests/e2e/screenshots";

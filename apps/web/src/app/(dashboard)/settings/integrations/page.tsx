@@ -6,7 +6,6 @@ import {
   Building2,
   Landmark,
   Mail,
-  Phone,
   Calendar,
   CheckCircle,
   XCircle,

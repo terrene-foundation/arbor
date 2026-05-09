@@ -10,7 +10,6 @@ import {
   Users,
   FileText,
   Shield,
-  BarChart3,
   Building2,
   ArrowRight,
   Sparkles,

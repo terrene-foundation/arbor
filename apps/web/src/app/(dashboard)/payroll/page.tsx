@@ -14,7 +14,6 @@ import {
   Calendar,
   TrendingUp,
   DollarSign,
-  ArrowRight,
   RefreshCw,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -36,7 +35,7 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function formatPeriod(start: string, end: string): string {
+function formatPeriod(start: string, _end: string): string {
   const s = new Date(start);
   return s.toLocaleDateString("en-SG", { month: "short", year: "numeric" });
 }

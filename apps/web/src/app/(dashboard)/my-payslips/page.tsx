@@ -21,7 +21,7 @@ function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function formatPeriod(start: string, end: string): string {
+function formatPeriod(start: string, _end: string): string {
   if (!start) return "-";
   const s = new Date(start);
   return s.toLocaleDateString("en-SG", { month: "long", year: "numeric" });
