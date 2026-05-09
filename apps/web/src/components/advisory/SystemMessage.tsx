@@ -29,7 +29,11 @@ interface SystemMessageProps {
   onFeedback?: (rating: "up" | "down", text?: string) => void;
   /** Whether the message is still streaming (hides feedback buttons) */
   streaming?: boolean;
-  messageId?: string;
+  // NOTE: a `messageId` prop was previously declared here but never
+  // threaded into the feedback callback because the backend
+  // `FeedbackSubmission` schema only has `session_id`. Per-message
+  // feedback wiring (frontend prop + service field + backend column)
+  // is tracked under terrene-foundation/arbor#40.
 }
 
 function riskTierLabel(tier: string): string {
@@ -131,7 +135,6 @@ export function SystemMessage({
   onSuggestionClick,
   onFeedback,
   streaming = false,
-  messageId,
 }: SystemMessageProps) {
   const [selectedProvision, setSelectedProvision] =
     useState<ProvisionCited | null>(null);

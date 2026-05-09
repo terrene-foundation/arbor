@@ -21,7 +21,6 @@ import {
   TrendingUp,
   ArrowLeft,
 } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
 import { reportsApi } from "@/services/api/reports";
 
 /* ── Report definitions ───────────────────────────────────── */
@@ -348,11 +347,10 @@ function ReportViewer({
 /* ── Page ─────────────────────────────────────────────────── */
 
 export default function ReportsPage() {
-  const { user } = useAuth();
-  const isAdmin =
-    user?.role === "owner" ||
-    user?.role === "hr_manager" ||
-    user?.role === "consultant";
+  // Role-gating for admin-only reports is tracked under
+  // terrene-foundation/arbor#39. Until that ships, every authenticated
+  // user sees every card; backend `/reports/{id}/data` endpoints enforce
+  // the access boundary server-side.
   const [selectedReport, setSelectedReport] = useState<ReportDef | null>(null);
 
   if (selectedReport) {
