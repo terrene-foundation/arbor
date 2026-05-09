@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import {
   FileText,
@@ -20,7 +20,7 @@ import {
   LoadingState,
   ErrorState,
 } from "@/components/design-system";
-import { documentsApi } from "@/services/api/documents";
+import { useDocumentTemplates } from "@/hooks/api";
 import type { DocumentTemplate } from "@/types/api";
 
 /* ── Constants ───────────────────────────────────────────── */
@@ -46,31 +46,26 @@ export default function DocumentsPage() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [activeCategory, setActiveCategory] = useState("All");
   const [search, setSearch] = useState("");
-  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const fetchTemplates = () => {
-    setLoading(true);
-    setError(null);
-    documentsApi
-      .listTemplates()
-      .then((data) => {
-        setTemplates(data.templates);
-      })
-      .catch((err) => {
-        setError(
-          err instanceof Error ? err.message : "Failed to load templates",
-        );
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+  const query = useDocumentTemplates();
+  /* F17: `data?.templates ?? []` allocates a fresh `[]` on every render when
+     loading (data === undefined). Wrapping in useMemo stabilises the
+     reference so the downstream `filtered` useMemo's deps are stable. */
+  const templates: DocumentTemplate[] = useMemo(
+    () => query.data?.templates ?? [],
+    [query.data],
+  );
+  const loading = query.isLoading;
+  const error = query.error
+    ? query.error.message || "Failed to load templates"
+    : null;
+
+  /* ── F2 onRetry shape adapter ─────────────────────────────────
+     ErrorState.onRetry is `() => void`. query.refetch returns
+     `Promise<QueryObserverResult>` — wrap so the surface matches. */
+  const handleRetry = () => {
+    void query.refetch();
   };
-
-  useEffect(() => {
-    fetchTemplates();
-  }, []);
 
   const filtered = useMemo(() => {
     let results = templates;
@@ -173,7 +168,7 @@ export default function DocumentsPage() {
           variant="server"
           title="Failed to load templates"
           description={error}
-          onRetry={fetchTemplates}
+          onRetry={handleRetry}
         />
       )}
 

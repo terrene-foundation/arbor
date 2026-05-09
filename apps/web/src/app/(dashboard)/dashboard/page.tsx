@@ -1,13 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  AppCard,
-  AppButton,
-  AlertBanner,
-  RiskTierBadge,
-} from "@/components/design-system";
+import { AppCard, AppButton, RiskTierBadge } from "@/components/design-system";
 import type { RiskTierLevel } from "@/components/design-system";
 import {
   ShadowBriefingCard,
@@ -16,12 +11,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { HRISModuleGrid } from "@/components/management/HRISModuleGrid";
 import { CompanySetupModal } from "@/components/company/CompanySetupModal";
-import { complianceApi } from "@/services/api/compliance";
-import { adminApi } from "@/services/api/admin";
-import type {
-  ComplianceStatusResponse,
-  PlatformMetricsResponse,
-} from "@/types/api";
+import { useDashboardCompliance, useDashboardMetrics } from "@/hooks/api";
 import {
   ShieldCheck,
   ClipboardCheck,
@@ -352,40 +342,23 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const firstName = user?.name?.split(" ")[0] ?? null;
 
-  /* ── State ───────────────────────────────────────────────── */
-  const [complianceData, setComplianceData] =
-    useState<ComplianceStatusResponse | null>(null);
-  const [metricsData, setMetricsData] =
-    useState<PlatformMetricsResponse | null>(null);
-  const [complianceLoading, setComplianceLoading] = useState(true);
-  const [metricsLoading, setMetricsLoading] = useState(true);
-  const [complianceError, setComplianceError] = useState<string | null>(null);
-  const [metricsError, setMetricsError] = useState<string | null>(null);
+  /* ── Data — TanStack Query ──────────────────────────────────
+     Both hooks default to `enabled: !!company_id`, so a user with no
+     company_id sees `isLoading=false` from the moment the component
+     mounts (no spinner deadlock). */
+  const complianceQuery = useDashboardCompliance(user?.company_id);
+  const metricsQuery = useDashboardMetrics();
 
-  /* ── Fetch data ──────────────────────────────────────────── */
-  useEffect(() => {
-    if (!user?.company_id) {
-      setComplianceLoading(false);
-      setMetricsLoading(false);
-      return;
-    }
-
-    complianceApi
-      .status(user.company_id)
-      .then((data) => setComplianceData(data))
-      .catch(() =>
-        setComplianceError("Unable to load compliance data right now."),
-      )
-      .finally(() => setComplianceLoading(false));
-
-    adminApi
-      .metrics()
-      .then((data) => setMetricsData(data))
-      .catch(() =>
-        setMetricsError("Unable to load platform metrics right now."),
-      )
-      .finally(() => setMetricsLoading(false));
-  }, [user?.company_id]);
+  const complianceData = complianceQuery.data ?? null;
+  const metricsData = metricsQuery.data ?? null;
+  const complianceLoading = !!user?.company_id && complianceQuery.isLoading;
+  const metricsLoading = metricsQuery.isLoading;
+  const complianceError = complianceQuery.error
+    ? "Unable to load compliance data right now."
+    : null;
+  const metricsError = metricsQuery.error
+    ? "Unable to load platform metrics right now."
+    : null;
 
   /* ── Derive metric cards from real data ──────────────────── */
   const metrics: MetricCard[] = [];

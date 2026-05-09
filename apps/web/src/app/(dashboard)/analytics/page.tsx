@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   BarChart3,
   Users,
@@ -14,17 +14,15 @@ import {
 } from "lucide-react";
 import { AppCard } from "@/components/design-system";
 import { useAuth } from "@/contexts/AuthContext";
-import { complianceApi } from "@/services/api/compliance";
-import { adminApi } from "@/services/api/admin";
-import { profileApi } from "@/services/api/profile";
-import type {
-  ComplianceStatusResponse,
-  PlatformMetricsResponse,
-  QueryPatternsResponse,
-  FeedbackSummaryResponse,
-  MonthlyReportResponse,
-  WorkforceBreakdown,
-} from "@/types/api";
+import {
+  useAnalyticsWorkforce,
+  useAnalyticsCompliance,
+  useAnalyticsMetrics,
+  useAnalyticsQueryPatterns,
+  useAnalyticsFeedbackSummary,
+  useAnalyticsMonthlyReport,
+} from "@/hooks/api";
+import type { ComplianceStatusResponse } from "@/types/api";
 
 /* ── Types ────────────────────────────────────────────────── */
 
@@ -359,91 +357,52 @@ export default function AnalyticsPage() {
     "overview" | "compliance" | "advisory"
   >("overview");
 
-  /* ── Data state ──────────────────────────────────────────── */
-  const [workforce, setWorkforce] = useState<WorkforceBreakdown | null>(null);
-  const [compliance, setCompliance] = useState<ComplianceStatusResponse | null>(
-    null,
-  );
-  const [metrics, setMetrics] = useState<PlatformMetricsResponse | null>(null);
-  const [patterns, setPatterns] = useState<QueryPatternsResponse | null>(null);
-  const [feedback, setFeedback] = useState<FeedbackSummaryResponse | null>(
-    null,
-  );
-  const [report, setReport] = useState<MonthlyReportResponse | null>(null);
+  /* ── Data — TanStack Query (6 parallel queries) ──────────────
+     Per F12: these hooks deliberately replace 18 useState lines from the
+     prior implementation. The dangling reportLoading/metricsError/
+     feedbackError/reportError state hooks AND their setter calls inside
+     the prior `.finally(...)` chain are eliminated as a side effect. */
+  const companyId = user?.company_id;
+  const workforceQuery = useAnalyticsWorkforce(companyId);
+  const complianceQuery = useAnalyticsCompliance(companyId);
+  const metricsQuery = useAnalyticsMetrics();
+  const patternsQuery = useAnalyticsQueryPatterns();
+  const feedbackQuery = useAnalyticsFeedbackSummary();
+  const reportQuery = useAnalyticsMonthlyReport();
 
-  /* ── Loading state ───────────────────────────────────────── */
-  const [workforceLoading, setWorkforceLoading] = useState(true);
-  const [complianceLoading, setComplianceLoading] = useState(true);
-  const [metricsLoading, setMetricsLoading] = useState(true);
-  const [patternsLoading, setPatternsLoading] = useState(true);
-  const [feedbackLoading, setFeedbackLoading] = useState(true);
-  const [reportLoading, setReportLoading] = useState(true);
+  const workforce = workforceQuery.data ?? null;
+  const compliance = complianceQuery.data ?? null;
+  const metrics = metricsQuery.data ?? null;
+  const patterns = patternsQuery.data ?? null;
+  const feedback = feedbackQuery.data ?? null;
+  /* Backend may return { empty: true } sentinel; narrow on the `period`
+     field so `report` is null when no real report exists. */
+  const reportRaw = reportQuery.data;
+  const report =
+    reportRaw && typeof reportRaw === "object" && "period" in reportRaw
+      ? reportRaw
+      : null;
 
-  /* ── Error state ─────────────────────────────────────────── */
-  const [workforceError, setWorkforceError] = useState<string | null>(null);
-  const [complianceError, setComplianceError] = useState<string | null>(null);
-  const [metricsError, setMetricsError] = useState<string | null>(null);
-  const [patternsError, setPatternsError] = useState<string | null>(null);
-  const [feedbackError, setFeedbackError] = useState<string | null>(null);
-  const [reportError, setReportError] = useState<string | null>(null);
+  /* `enabled: !!companyId` makes companyId-gated queries report
+     `isLoading: false` immediately when there is no company, matching the
+     prior bypass branch. */
+  const workforceLoading = !!companyId && workforceQuery.isLoading;
+  const complianceLoading = !!companyId && complianceQuery.isLoading;
+  const metricsLoading = metricsQuery.isLoading;
+  const patternsLoading = patternsQuery.isLoading;
+  const feedbackLoading = feedbackQuery.isLoading;
 
-  /* ── Fetch all data on mount ─────────────────────────────── */
-  useEffect(() => {
-    const companyId = user?.company_id;
-
-    if (companyId) {
-      profileApi
-        .workforce(companyId)
-        .then((data) => setWorkforce(data))
-        .catch(() =>
-          setWorkforceError("Unable to load workforce data right now."),
-        )
-        .finally(() => setWorkforceLoading(false));
-
-      complianceApi
-        .status(companyId)
-        .then((data) => setCompliance(data))
-        .catch(() =>
-          setComplianceError("Unable to load compliance data right now."),
-        )
-        .finally(() => setComplianceLoading(false));
-    } else {
-      setWorkforceLoading(false);
-      setComplianceLoading(false);
-    }
-
-    adminApi
-      .metrics()
-      .then((data) => setMetrics(data))
-      .catch(() => setMetricsError("Unable to load metrics right now."))
-      .finally(() => setMetricsLoading(false));
-
-    adminApi
-      .queryPatterns()
-      .then((data) => setPatterns(data))
-      .catch(() => setPatternsError("Unable to load query patterns right now."))
-      .finally(() => setPatternsLoading(false));
-
-    adminApi
-      .feedbackSummary()
-      .then((data) => setFeedback(data))
-      .catch(() => setFeedbackError("Unable to load feedback data right now."))
-      .finally(() => setFeedbackLoading(false));
-
-    adminApi
-      .monthlyReport()
-      .then((data) => {
-        // Backend returns { empty: true } when no reports exist yet
-        if (data && !("empty" in data)) {
-          setReport(data);
-        }
-      })
-      .catch(() => {
-        // Gracefully handle errors -- not a critical section
-        setReportError(null);
-      })
-      .finally(() => setReportLoading(false));
-  }, [user?.company_id]);
+  const workforceError = workforceQuery.error
+    ? "Unable to load workforce data right now."
+    : null;
+  const complianceError = complianceQuery.error
+    ? "Unable to load compliance data right now."
+    : null;
+  const patternsError = patternsQuery.error
+    ? "Unable to load query patterns right now."
+    : null;
+  /* metricsError, feedbackError, reportError previously had dedicated
+     state but were never rendered — F12 cascade noted them as dead. */
 
   /* ── Derive data for the workforce overview ──────────────── */
   const workforceBreakdown: BreakdownItem[] = workforce
