@@ -70,3 +70,66 @@ Per `rules/specs-authority.md` Rule 1, the canonical home for project specs is *
 ## Definition of Done
 
 `npx eslint .` green-on-CI as a structural gate; specs landed with redteam addenda; project skill codified; brief criteria 1+2+3+4 all closed against the contract. Shard D workstream closed.
+
+## Verification
+
+### Final lint state
+
+| Stage             | Errors | Warnings |
+|-------------------|--------|----------|
+| Pre-S5 (post-S4)  | 0      | 1        |
+| **S5 final**      | **0**  | **0**    |
+
+Brief criterion 1 met: `npx eslint .` exits 0/0.
+
+### Cumulative Shard D delta
+
+| Shard | Errors removed | Warnings removed | Status |
+|-------|---------------|------------------|--------|
+| S1a   | 12            | 4                | ✅ Merged (PR #34) |
+| S1b   | 1             | 26               | ✅ Merged (PR #35) |
+| S2    | 6             | 6                | ✅ Merged (PR #37) |
+| S3    | 12            | 3                | ✅ Merged (PR #38) |
+| S4    | 0             | 12               | ✅ Merged (PR #41) |
+| S5    | 0             | 1                | This PR |
+| **Total** | **31** | **52** | 31→0 errors, 52→0 warnings |
+
+### Acceptance gates
+
+- [x] `npx eslint .` → 0 errors / 0 warnings (brief criterion 1)
+- [x] `npx tsc --noEmit` clean
+- [x] `npm run test -- --run` → 17 files / 84 tests passing
+- [x] `npm run build` → Compiled successfully in 2.5s
+- [x] CI gate added: `.github/workflows/lint-web.yml` runs `npx eslint . --max-warnings 0` + `npx tsc --noEmit` on every PR + push-to-main (brief criterion 1 structurally enforced — F25)
+
+### Spec landing (brief criterion 3)
+
+Workspace specs promoted to project-root `specs/`:
+- `specs/frontend-data-fetching.md` (241 lines) — canonical TanStack Query patterns + per-hook staleTime decisions
+- `specs/react-hooks-correctness.md` (261 lines) — 7 antipatterns + when useEffect IS the right tool
+- `specs/_index.md` updated with both entries
+
+Workspace drafts at `workspaces/shard-d-lint/specs/` retained as historical trail per `rules/specs-authority.md`.
+
+### Codify
+
+- `.claude/skills/project/frontend-data-fetching.md` (~140 lines) — agent-facing project skill pointing to specs
+- `.claude/skills/project/SKILL.md` updated with new "Frontend (apps/web)" section
+
+### Brief criteria — all 4 closed
+
+| # | Criterion | Status | Reference |
+|---|-----------|--------|-----------|
+| 1 | `npx eslint .` exits 0/0 | ✅ | S5.1 + CI gate (F25) |
+| 2 | No `// eslint-disable-*` added EXCEPT structurally inapplicable + tracking issue | ✅ | 2 disables (issue #33), all other shards 0 disables |
+| 3 | `specs/frontend-data-fetching.md` exists | ✅ | Promoted to project root in S5.4 |
+| 4 | No regression in production behavior | ✅ | S2 regression suite (6 specs / 30 tests) + S4 restored-UI tests (6 specs / 11 tests) + S3 type cascade tsc-verified |
+
+### Tracking issues filed across Shard D
+
+- [#33](https://github.com/terrene-foundation/arbor/issues/33) — 2 structurally-inapplicable react-hooks disables (S1a)
+- [#36](https://github.com/terrene-foundation/arbor/issues/36) — Backend structured `error.code` for invite-validation (S2 F21)
+- [#39](https://github.com/terrene-foundation/arbor/issues/39) — `ReportDef.adminOnly` field (S4)
+- [#40](https://github.com/terrene-foundation/arbor/issues/40) — `messageId` backend schema (S4)
+
+**Closed:** 2026-05-09. Shard D workstream complete.

@@ -62,9 +62,6 @@ test.describe("HR Calculators", () => {
     }
 
     // Click on CPF calculator
-    const cpfButton = page
-      .getByRole("button", { name: /open calculator/i })
-      .first();
     const cpfCard = page
       .locator('[class*="card"]')
       .filter({ hasText: /CPF/i })
