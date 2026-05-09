@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ChevronLeft, ChevronRight, X, Lightbulb } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Lightbulb, History } from "lucide-react";
 import clsx from "clsx";
 import { useShadowAgent } from "./ShadowAgentContext";
 import type { ObservationInsight } from "./useObservation";
@@ -308,14 +308,14 @@ export function ShadowMargin({
           </div>
 
           {/* Quick command bar at bottom */}
-          <div className="px-3 py-2 border-t border-[var(--color-gray-200)]">
+          <div className="px-3 py-2 border-t border-[var(--color-gray-200)] flex items-center gap-2">
             <button
               type="button"
               onClick={() => {
                 setIsExpanded(false);
                 openCommand();
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-gray-100)] text-sm text-[var(--color-gray-500)] hover:bg-[var(--color-gray-200)] transition-colors"
+              className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-gray-100)] text-sm text-[var(--color-gray-500)] hover:bg-[var(--color-gray-200)] transition-colors"
             >
               <svg
                 width="14"
@@ -336,6 +336,21 @@ export function ShadowMargin({
               </svg>
               Ask Arbor...
             </button>
+            {onOpenHistory && (
+              <button
+                type="button"
+                data-testid="shadow-margin-open-history"
+                onClick={() => {
+                  setIsExpanded(false);
+                  onOpenHistory();
+                }}
+                className="shrink-0 p-2 rounded-lg text-[var(--color-gray-400)] hover:text-[var(--foreground)] hover:bg-[var(--color-gray-100)] transition-colors"
+                aria-label="Open action history"
+                title="Open action history"
+              >
+                <History className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
           </div>
         </div>
       )}

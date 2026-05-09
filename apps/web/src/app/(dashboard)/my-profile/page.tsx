@@ -204,13 +204,20 @@ export default function MyProfilePage() {
   const [savingSection, setSavingSection] = useState<string | null>(null);
   const [savedSection, setSavedSection] = useState<string | null>(null);
 
-  // Track which fields are required for payroll
-  const payrollRequired = [
-    "date_of_birth",
-    "nric_fin",
-    "bank_name",
-    "bank_account_number",
+  // Track which fields are required for payroll. Values left blank here
+  // BLOCK payroll calculation server-side (CPF, statutory deductions,
+  // disbursement). Surfaced as a separate banner below so the user knows
+  // which gaps to close before the next payroll cycle.
+  const payrollRequired: { key: keyof ProfileData; label: string }[] = [
+    { key: "date_of_birth", label: "Date of birth" },
+    { key: "nric_fin", label: "NRIC / FIN" },
+    { key: "bank_name", label: "Bank name" },
+    { key: "bank_account_number", label: "Bank account number" },
   ];
+
+  const missingPayrollFields = profile
+    ? payrollRequired.filter(({ key }) => !profile[key])
+    : [];
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -326,6 +333,34 @@ export default function MyProfilePage() {
                   style={{ width: `${completionPct}%` }}
                 />
               </div>
+            </div>
+          </div>
+        </AppCard>
+      )}
+
+      {/* Missing payroll-critical fields banner */}
+      {missingPayrollFields.length > 0 && (
+        <AppCard variant="flat" data-testid="missing-payroll-banner">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-[var(--color-risk-red)] flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-[var(--color-gray-700)]">
+                Payroll cannot be processed yet
+              </p>
+              <p className="text-xs text-[var(--color-gray-500)] mt-0.5">
+                These fields are required for CPF, statutory deductions, and
+                bank disbursement:
+              </p>
+              <ul className="mt-2 flex flex-wrap gap-1.5">
+                {missingPayrollFields.map(({ key, label }) => (
+                  <li
+                    key={key}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-[var(--color-risk-red)] border border-red-200"
+                  >
+                    {label}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </AppCard>

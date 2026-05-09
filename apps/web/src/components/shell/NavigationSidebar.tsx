@@ -410,7 +410,7 @@ export function NavigationSidebar({
             <NavGroupLabel label="Management" collapsed={collapsed} />
             <ul className="flex flex-col gap-0.5 px-2" role="list">
               {adminManagementNavItems.map((item) =>
-                item.children && !collapsed ? (
+                item.children ? (
                   <ExpandableNavLink
                     key={item.href}
                     item={item}
@@ -503,6 +503,50 @@ function ExpandableNavLink({
   const [expanded, setExpanded] = useState(active);
   const Icon = item.icon;
 
+  // Collapsed mode: hide the chevron + child group entirely (no horizontal
+  // room for them in a 64px-wide rail). Render as an icon-only Link to the
+  // group's parent href with a hover tooltip — matches NavLink's collapsed
+  // affordance so the two component types are visually consistent.
+  if (collapsed) {
+    return (
+      <li>
+        <Link
+          href={item.href}
+          title={item.label}
+          aria-current={active ? "page" : undefined}
+          className={clsx(
+            "group relative flex items-center justify-center rounded-lg",
+            "min-h-[44px] px-0",
+            "transition-colors duration-200",
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+            active
+              ? "bg-[var(--color-primary-light)] text-white"
+              : "text-white/70 hover:text-white hover:bg-[var(--color-surface-sidebar-hover)]",
+          )}
+        >
+          <Icon
+            className={clsx("h-5 w-5 shrink-0", item.iconClassName)}
+            aria-hidden="true"
+          />
+          {/* Tooltip — matches NavLink collapsed pattern */}
+          <span
+            className={clsx(
+              "absolute left-full ml-2 px-2 py-1 rounded-md",
+              "bg-[var(--color-gray-900)] text-white text-xs font-medium",
+              "whitespace-nowrap opacity-0 pointer-events-none",
+              "group-hover:opacity-100 group-focus-visible:opacity-100",
+              "transition-opacity duration-150 z-50",
+              "shadow-[var(--shadow-raised)]",
+            )}
+            role="tooltip"
+          >
+            {item.label}
+          </span>
+        </Link>
+      </li>
+    );
+  }
+
   return (
     <li>
       <button
@@ -516,6 +560,7 @@ function ExpandableNavLink({
             ? "bg-[var(--color-primary-light)] text-white"
             : "text-white/70 hover:text-white hover:bg-[var(--color-surface-sidebar-hover)]",
         )}
+        aria-expanded={expanded}
       >
         <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
         <span className="text-sm font-medium truncate flex-1">
