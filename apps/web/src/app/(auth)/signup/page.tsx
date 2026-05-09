@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -14,10 +14,8 @@ import {
   AuthError,
   type RegisterEmployeeData,
 } from "@/services/api/auth";
-import {
-  validateInvite,
-  type InviteValidation,
-} from "@/services/api/employees";
+import { type InviteValidation } from "@/services/api/employees";
+import { useInviteValidation } from "@/hooks/api";
 
 /* ── Validation schemas ────────────────────────────────────── */
 
@@ -525,52 +523,45 @@ function SignupContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
 
-  const [inviteState, setInviteState] = useState<InviteState>(
-    token ? { status: "validating" } : { status: "idle" },
-  );
+  const query = useInviteValidation(token);
 
-  useEffect(() => {
-    if (!token) {
-      setInviteState({ status: "idle" });
-      return;
-    }
+  /* ── Map TanStack Query result → InviteState (F21) ──────────
+     The mapping below performs a TEMPORARY error.message keyword sniff
+     on the backend's free-text "detail" field. This is brittle; the
+     proper fix is structured `error.code` (INVITE_EXPIRED / INVITE_USED
+     / INVITE_INVALID) returned by the backend. Tracked at
+     terrene-foundation/arbor#36. Once that ships, switch the dispatch to
+     `error.code` and delete the keyword sniff in this file AND in the
+     `useInviteValidation` docstring. */
+  const inviteState: InviteState = useMemo(() => {
+    if (!token) return { status: "idle" };
+    if (query.isLoading || query.isPending) return { status: "validating" };
+    if (query.data) return { status: "valid", data: query.data };
 
-    let cancelled = false;
+    if (query.error) {
+      const err = query.error as Error & { status?: number; message?: string };
+      const msg = err.message ?? "";
+      const msgLower = msg.toLowerCase();
 
-    async function validate() {
-      try {
-        const data = await validateInvite(token as string);
-        if (!cancelled) {
-          setInviteState({ status: "valid", data });
-        }
-      } catch (error: unknown) {
-        if (cancelled) return;
-
-        const err = error as { status?: number; message?: string };
-        const msg = err.message ?? "";
-        const msgLower = msg.toLowerCase();
-
-        if (msgLower.includes("expired")) {
-          setInviteState({ status: "expired", message: msg });
-        } else if (
-          msgLower.includes("already been used") ||
-          msgLower.includes("already accepted")
-        ) {
-          setInviteState({ status: "already_used", message: msg });
-        } else if (err.status === 404 || err.status === 400) {
-          setInviteState({ status: "invalid", message: msg });
-        } else {
-          setInviteState({ status: "network_error", message: msg });
-        }
+      if (msgLower.includes("expired")) {
+        return { status: "expired", message: msg };
       }
+      if (
+        msgLower.includes("already been used") ||
+        msgLower.includes("already accepted")
+      ) {
+        return { status: "already_used", message: msg };
+      }
+      if (err.status === 404 || err.status === 400) {
+        return { status: "invalid", message: msg };
+      }
+      return { status: "network_error", message: msg };
     }
 
-    validate();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+    /* enabled=false (no token) — already handled above. Treat any other
+       residual "no data, no error, not loading" as idle. */
+    return { status: "idle" };
+  }, [token, query.isLoading, query.isPending, query.data, query.error]);
 
   /* No token present -- standard signup */
   if (inviteState.status === "idle") {

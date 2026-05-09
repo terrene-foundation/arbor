@@ -103,3 +103,23 @@ export {
   useImportConfirm,
   usePayNowQR,
 } from "./useIntegrations";
+
+export {
+  dashboardKeys,
+  useDashboardCompliance,
+  useDashboardMetrics,
+} from "./useDashboard";
+
+export {
+  analyticsKeys,
+  useAnalyticsWorkforce,
+  useAnalyticsCompliance,
+  useAnalyticsMetrics,
+  useAnalyticsQueryPatterns,
+  useAnalyticsFeedbackSummary,
+  useAnalyticsMonthlyReport,
+} from "./useAnalytics";
+
+export { employeesKeys, useEmployeeForPicker } from "./useEmployees";
+
+export { authKeys, useInviteValidation } from "./useAuth";

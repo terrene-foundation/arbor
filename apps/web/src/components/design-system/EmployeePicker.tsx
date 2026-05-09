@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { employeesApi } from "@/services/api/employees";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useEmployeeForPicker } from "@/hooks/api";
 import { Search, X, User } from "lucide-react";
 
 interface Employee {
@@ -29,39 +29,31 @@ export function EmployeePicker({
   disabled,
   excludeIds = [],
 }: EmployeePickerProps) {
-  const [employees, setEmployees] = useState<Employee[]>([]);
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [selected, setSelected] = useState<Employee | null>(null);
+  const [manualSelected, setManualSelected] = useState<Employee | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Fetch employees once
-  useEffect(() => {
-    let cancelled = false;
-    setIsLoading(true);
-    employeesApi
-      .list()
-      .then((data) => {
-        if (!cancelled) {
-          setEmployees(data.employees || []);
-          // If we have a value, find the matching employee
-          if (value) {
-            const match = (data.employees || []).find(
-              (e: Employee) => e.id === value,
-            );
-            if (match) setSelected(match);
-          }
-          setIsLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [value]);
+  const query = useEmployeeForPicker();
+  const employees: Employee[] = useMemo(
+    () => (query.data?.employees as Employee[] | undefined) ?? [],
+    [query.data],
+  );
+  const isLoading = query.isLoading;
+
+  // Derive the currently-selected employee.
+  //
+  // Priority:
+  //   1. If the consumer's `value` has been externally cleared / changed,
+  //      the manual override is discarded (its id no longer matches).
+  //   2. Otherwise prefer `manualSelected` so `handleSelect` reflects
+  //      immediately, before the consumer round-trips the new value back.
+  //   3. Otherwise resolve via the fetched list (cold-start path).
+  const selected: Employee | null = useMemo(() => {
+    if (manualSelected && manualSelected.id === value) return manualSelected;
+    if (value == null) return null;
+    return employees.find((e) => e.id === value) ?? null;
+  }, [value, employees, manualSelected]);
 
   // Click outside to close
   useEffect(() => {
@@ -89,14 +81,14 @@ export function EmployeePicker({
   });
 
   function handleSelect(emp: Employee) {
-    setSelected(emp);
+    setManualSelected(emp);
     onChange(emp.id, emp);
     setSearch("");
     setIsOpen(false);
   }
 
   function handleClear() {
-    setSelected(null);
+    setManualSelected(null);
     onChange(null);
     setSearch("");
   }

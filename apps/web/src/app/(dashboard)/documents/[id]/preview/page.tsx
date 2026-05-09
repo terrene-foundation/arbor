@@ -1,38 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FileText, ArrowLeft, Shield, BookOpen, Download } from "lucide-react";
+import { FileText, ArrowLeft, Shield, BookOpen } from "lucide-react";
 import { AppCard, AppButton, SourceCitation } from "@/components/design-system";
-import { documentsApi } from "@/services/api/documents";
-import type { DocumentTemplate } from "@/types/api";
+import { useDocumentTemplate } from "@/hooks/api";
 
 export default function TemplatePreviewPage() {
   const params = useParams();
-  const templateId = Number(params.id);
-  const [template, setTemplate] = useState<DocumentTemplate | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const idParam = params?.id;
+  const idStr =
+    typeof idParam === "string"
+      ? idParam
+      : Array.isArray(idParam)
+        ? idParam[0]
+        : "";
+  const templateIdNum = Number(idStr);
+  const isInvalidId = !idStr || isNaN(templateIdNum);
 
-  useEffect(() => {
-    if (!templateId || isNaN(templateId)) {
-      setError("Invalid template ID");
-      setLoading(false);
-      return;
-    }
-
-    documentsApi
-      .getTemplate(templateId)
-      .then((t) => {
-        setTemplate(t);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.detail || "Failed to load template");
-        setLoading(false);
-      });
-  }, [templateId]);
+  /* ── F2 invalid-id branch ─────────────────────────────────────
+     With useQuery({ enabled: !isInvalidId }), an invalid id yields
+     `isLoading: false, error: undefined, data: undefined` — the page
+     MUST explicitly render the "Invalid template ID" branch because
+     `query.error` alone is insufficient for this state. */
+  const query = useDocumentTemplate(isInvalidId ? "" : idStr);
+  const template = query.data;
+  const loading = !isInvalidId && query.isLoading;
+  const errorMessage = isInvalidId
+    ? "Invalid template ID"
+    : query.error
+      ? (query.error as Error & { detail?: string }).detail ||
+        query.error.message ||
+        "Failed to load template"
+      : null;
 
   if (loading) {
     return (
@@ -42,7 +42,7 @@ export default function TemplatePreviewPage() {
     );
   }
 
-  if (error || !template) {
+  if (errorMessage || !template) {
     return (
       <div className="max-w-4xl mx-auto space-y-4">
         <Link
@@ -53,7 +53,7 @@ export default function TemplatePreviewPage() {
         </Link>
         <AppCard variant="standard">
           <p className="text-[var(--color-gray-600)]">
-            {error || "Template not found."}
+            {errorMessage || "Template not found."}
           </p>
         </AppCard>
       </div>
@@ -93,7 +93,7 @@ export default function TemplatePreviewPage() {
             </div>
           </div>
         </div>
-        <Link href={`/documents/${templateId}/generate`}>
+        <Link href={`/documents/${templateIdNum}/generate`}>
           <AppButton>Generate Document</AppButton>
         </Link>
       </div>
