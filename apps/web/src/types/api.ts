@@ -689,9 +689,21 @@ export interface ClientListResponse {
 
 export interface ClientCreateRequest {
   name: string;
-  uen: string;
+  /** Optional — onboarding flows submit without UEN; admin clients/page submits with UEN. */
+  uen?: string;
   sector: string;
-  employee_count: number;
+  /**
+   * Headcount field accepted by backend `POST /clients/`.
+   *
+   * Backend (src/hr_advisory/api/routers/clients.py:96) accepts BOTH legacy
+   * keys: `employee_count` (consultant clients page) and `estimated_headcount`
+   * (onboarding + setup-modal flows). Both are optional on the request; the
+   * backend coalesces them into the company's `headcount_local` column.
+   * Callers MUST pass at least one — TypeScript permits omitting both since
+   * the backend defaults to 0.
+   */
+  employee_count?: number;
+  estimated_headcount?: number;
 }
 
 /* ── Alerts ──────────────────────────────────────────────────── */

@@ -300,9 +300,18 @@ export const employeesApi = {
     return apiClient.post<InviteResponse>("/employees/invite", data);
   },
 
-  /** Admin: list all invitations for the current company. */
-  listInvitations(): Promise<Invitation[]> {
-    return apiClient.get<Invitation[]>("/employees/invitations");
+  /**
+   * Admin: list all invitations for the current company.
+   *
+   * The backend gateway has historically returned the list both as a bare
+   * array AND wrapped in `{ invitations: [...] }`. The page-level caller
+   * defensively probes for both shapes; the return type carries both so
+   * the probe type-checks without an `as any` cast.
+   */
+  listInvitations(): Promise<Invitation[] | { invitations: Invitation[] }> {
+    return apiClient.get<Invitation[] | { invitations: Invitation[] }>(
+      "/employees/invitations",
+    );
   },
 
   /** Admin: revoke a pending invitation. */

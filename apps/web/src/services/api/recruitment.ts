@@ -4,10 +4,22 @@ import { apiClient } from "./client";
 
 /* ── Types ────────────────────────────────────────────────── */
 
+/**
+ * Job listing as returned by `GET /recruitment/jobs`.
+ *
+ * The canonical backend field is `position_title` (see model `JobListing`
+ * in `src/hr_advisory/models/company_user.py:2065`). The earlier API
+ * response shape used `title`; both are kept here as optional fields so
+ * the recruitment page's `job.title || job.position_title` fallback
+ * type-checks without an `as any` cast.
+ */
 export interface JobListing {
   id: number;
   company_id: number;
-  title: string;
+  /** Display title — preferred field on the response. */
+  title?: string;
+  /** Canonical backend field — `JobListing.position_title`. */
+  position_title?: string;
   department: string;
   location: string;
   employment_type: "full_time" | "part_time" | "contract" | "intern";

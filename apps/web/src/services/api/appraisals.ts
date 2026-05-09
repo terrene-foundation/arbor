@@ -4,6 +4,14 @@ import { apiClient } from "./client";
 
 /* ── Types ────────────────────────────────────────────────── */
 
+/**
+ * Appraisal template as returned by `GET /appraisals/templates`.
+ *
+ * `created_at` / `updated_at` are auto-managed by the DataFlow ORM on every
+ * `@db.model` (see `src/hr_advisory/models/company_user.py:1652`). They are
+ * always returned by the backend; the previous interface omitted them, which
+ * forced the appraisals page to use `(t as any).created_at`.
+ */
 export interface AppraisalTemplate {
   id: number;
   company_id: number;
@@ -12,6 +20,8 @@ export interface AppraisalTemplate {
   enable_weightage: boolean;
   require_employee_signoff: boolean;
   is_archived: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AppraisalPeriod {
