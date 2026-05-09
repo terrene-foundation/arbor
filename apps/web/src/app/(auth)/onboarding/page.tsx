@@ -41,11 +41,12 @@ export default function OnboardingPage() {
           name: data.companyName,
           sector: data.sector,
           estimated_headcount: data.totalHeadcount || 5,
-        } as any);
+        });
         await refreshUser?.();
-      } catch (err: any) {
+      } catch (err) {
         // Company may already exist — continue with onboarding
-        console.warn("Company creation during onboarding:", err?.message);
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn("Company creation during onboarding:", message);
       }
       goNext();
     },

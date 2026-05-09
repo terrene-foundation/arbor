@@ -929,7 +929,7 @@ export default function RecruitmentPage() {
                         className="border-b border-[var(--color-gray-100)] last:border-0 hover:bg-[var(--color-gray-50)] transition-colors"
                       >
                         <td className="py-3 px-5 font-medium text-[var(--color-gray-900)]">
-                          {job.title || (job as any).position_title || "-"}
+                          {job.title || job.position_title || "-"}
                         </td>
                         <td className="py-3 px-3 text-[var(--color-gray-600)]">
                           {job.department || "-"}

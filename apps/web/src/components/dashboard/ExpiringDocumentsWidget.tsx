@@ -61,7 +61,6 @@ export function ExpiringDocumentsWidget() {
     try {
       const { employees } = await employeesApi.list();
       const now = Date.now();
-      const ninetyDaysMs = 90 * 86400000;
       const results: ExpiringDoc[] = [];
 
       // Fetch documents for each employee and check for expiring ones

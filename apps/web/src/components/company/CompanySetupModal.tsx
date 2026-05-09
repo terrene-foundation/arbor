@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Building2, ArrowRight, Sparkles, CheckCircle2, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { clientsApi } from "@/services/api";
+import { humanizeError } from "@/services/api/errors";
 
 const SECTORS = [
   { value: "technology", label: "Technology & IT" },
@@ -57,7 +58,7 @@ export function CompanySetupModal({
         uen: form.uen || undefined,
         sector: form.sector,
         estimated_headcount: parseInt(form.headcount.split("-")[0]) || 5,
-      } as any);
+      });
 
       await refreshUser?.();
       setStep(2);
@@ -66,11 +67,15 @@ export function CompanySetupModal({
         onClose();
         window.location.reload();
       }, 1500);
-    } catch (err: any) {
-      const message =
-        err?.detail ||
-        err?.message ||
-        "Something went wrong. Please try again.";
+    } catch (err) {
+      // Prefer backend-provided `detail` for actionable user-facing copy
+      // (e.g. "UEN already registered"), then fall back to the standard
+      // humanizeError mapping for transport / status-code failures.
+      const detail =
+        err !== null && typeof err === "object" && "detail" in err
+          ? String((err as { detail?: unknown }).detail ?? "")
+          : "";
+      const message = detail || humanizeError(err);
       alert(message);
     } finally {
       setIsSubmitting(false);
@@ -208,7 +213,7 @@ export function CompanySetupModal({
                 onClick={onClose}
                 className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium"
               >
-                I'll do this later
+                I&apos;ll do this later
               </button>
               <button
                 onClick={handleSubmit}
@@ -234,7 +239,7 @@ export function CompanySetupModal({
               <CheckCircle2 className="w-8 h-8 text-green-600" />
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-3">
-              You're all set!
+              You&apos;re all set!
             </h2>
             <p className="text-gray-600">
               Your company is ready. The full HR management suite is now

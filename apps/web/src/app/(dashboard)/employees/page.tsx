@@ -921,9 +921,11 @@ export default function EmployeesPage() {
     setInvitationsError(null);
     try {
       const data = await employeesApi.listInvitations();
-      const list = Array.isArray(data)
+      // Backend gateway returns either a bare array or { invitations: [...] };
+      // the service type carries both shapes — narrow with a type guard.
+      const list: Invitation[] = Array.isArray(data)
         ? data
-        : ((data as any)?.invitations ?? []);
+        : (data?.invitations ?? []);
       setInvitations(list);
     } catch (err: unknown) {
       const message =

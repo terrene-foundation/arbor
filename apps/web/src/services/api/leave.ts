@@ -4,14 +4,42 @@ import { apiClient } from "./client";
 
 /* ── Types ────────────────────────────────────────────────── */
 
+/**
+ * Leave type configuration as returned by `GET /leave/types`.
+ *
+ * Canonical backend shape (LeaveTypeConfig DataFlow model — see
+ * `src/hr_advisory/models/company_user.py:889`): `name`, `code`, `category`,
+ * `default_days`, plus `is_paid`, `is_pro_ratable`, `requires_attachment`,
+ * `is_active`. The frontend used to read display values from a response
+ * shape that differed from the model (`leave_type_name`, `entitlement_days`)
+ * — those legacy aliases are kept as optional fields so existing JSX that
+ * defensively reads either alias type-checks without an `as any` cast.
+ *
+ * The leave/page.tsx admin "Leave Type Configuration" table reads
+ * `lt.name || lt.leave_type_name` and `lt.default_days ?? lt.entitlement_days`
+ * — both halves of each pair are optional here so neither side breaks.
+ */
 export interface LeaveType {
   id: number;
   name: string;
-  description: string;
+  description?: string;
   is_paid: boolean;
   requires_attachment: boolean;
-  max_days_per_year: number;
   is_active: boolean;
+  /** Canonical backend fields. */
+  code?: string;
+  category?: string;
+  is_pro_ratable?: boolean;
+  default_days?: number;
+  max_carry_forward?: number;
+  carry_forward_expiry_months?: number;
+  min_service_months?: number;
+  applicable_gender?: string;
+  /** Legacy aliases — kept optional for response-shape variations. */
+  leave_type_name?: string;
+  entitlement_days?: number;
+  max_days_per_year?: number;
+  gender_restriction?: string;
 }
 
 export interface LeaveApplication {
@@ -79,9 +107,25 @@ export interface ApplyLeaveData {
 /* ── API Methods ─────────────────────────────────────────── */
 
 export const leaveApi = {
-  /** List all leave types configured for the company. */
-  listTypes(): Promise<{ types: LeaveType[] }> {
-    return apiClient.get<{ types: LeaveType[] }>("/leave/types");
+  /**
+   * List all leave types configured for the company.
+   *
+   * The backend currently returns `{ leave_types: LeaveTypeConfig[], count }`
+   * (src/hr_advisory/api/routers/leave.py:463) but earlier response shapes
+   * used `{ types: LeaveType[] }`. The return type carries both keys as
+   * optional so the page-level fallback `typesRes.types ?? typesRes.leave_types`
+   * type-checks without an `as any` cast.
+   */
+  listTypes(): Promise<{
+    types?: LeaveType[];
+    leave_types?: LeaveType[];
+    count?: number;
+  }> {
+    return apiClient.get<{
+      types?: LeaveType[];
+      leave_types?: LeaveType[];
+      count?: number;
+    }>("/leave/types");
   },
 
   /** Apply for leave. */

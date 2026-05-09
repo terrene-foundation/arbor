@@ -4,6 +4,16 @@ import { apiClient } from "./client";
 
 /* ── Types ────────────────────────────────────────────────── */
 
+/**
+ * Project as returned by `GET /projects/`.
+ *
+ * The backend `Project` model (src/hr_advisory/models/company_user.py:1825)
+ * exposes `budget_amount: float` and `is_archived: boolean`. The frontend
+ * page normalises these onto its `Project` type via
+ * `budget = budget_amount`, `status = is_archived ? "archived" : "active"`
+ * — both legacy fields are kept as optional here so the normaliser
+ * type-checks without an `as any` cast.
+ */
 export interface Project {
   id: number;
   company_id: number;
@@ -19,6 +29,9 @@ export interface Project {
   manager_id: number;
   manager_name?: string;
   assignment_count?: number;
+  /** Canonical backend fields — see model `Project` in company_user.py. */
+  budget_amount?: number;
+  is_archived?: boolean;
 }
 
 export interface ProjectAssignment {
