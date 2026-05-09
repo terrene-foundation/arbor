@@ -138,8 +138,22 @@ const controller = createSSEStream("/advisory/stream", body, {
 - `apps/web/src/services/api/client.ts` — Base API client with token refresh
 - `apps/web/src/services/api/sse.ts` — SSE streaming client
 - `apps/web/src/services/api/errors.ts` — Error humanisation
-- `apps/web/src/hooks/useAdvisoryHistory.ts` — Advisory history hook
+- `apps/web/src/hooks/api/use*.ts` — TanStack Query hooks (one per domain)
 - `design-tokens/` — Design tokens and generator
+
+## Canonical Patterns (read first when adding/migrating fetch logic)
+
+- **Spec**: `specs/frontend-data-fetching.md` — TanStack Query patterns, queryKey conventions, per-hook staleTime decision protocol, when `useEffect+setState` is wrong.
+- **Spec**: `specs/react-hooks-correctness.md` — 7 antipatterns + when `useEffect` IS the right tool, `key=<field>` choice for refetch flows, `data?.X ?? []` exhaustive-deps gotcha.
+- **Skill**: `.claude/skills/project/frontend-data-fetching.md` — agent-facing pointer with the per-hook staleTime decision table + pattern selection decision tree.
+
+Critical takeaways:
+
+- `useQuery` is the canonical fetch pattern; raw `useEffect+fetch+setState` is BLOCKED for fetch-on-mount.
+- Per-hook `staleTime` is a per-domain decision (no generic defaults). External-mutator-prone data → `0`; aggregates → `30_000`; rarely-changing → `60_000`; expensive computed → `300_000`; single-use tokens → `0` + `retry: false`.
+- Form-reset on save: `key={employee.updated_at ?? employee.id}` (NOT `id` alone — id is stable across saves).
+- SSR-safe hydration boundary: `useSyncExternalStore` with `getServerSnapshot=()=>false`, `getClientSnapshot=()=>true` (avoids `setState`-in-effect).
+- `Date.now()` in render trips `react-hooks/purity` even inside `useMemo` — use `useState(() => Date.now())` mount-capture instead.
 
 ## When Invoked
 
@@ -173,3 +187,6 @@ const controller = createSSEStream("/advisory/stream", body, {
 - Typography MUST use the `.text-*` scale classes with `--text-size-multiplier` support.
 - ALL animations MUST respect `prefers-reduced-motion` media query.
 - CSV exports MUST sanitize cells against formula injection (`=`, `+`, `-`, `@`).
+- Fetch-on-mount MUST use TanStack Query `useQuery`, NOT `useEffect+fetch+setState` (see canonical patterns above).
+- New TanStack Query hooks MUST justify their `staleTime` inline as a 1-line comment per the per-domain decision protocol in `specs/frontend-data-fetching.md`.
+- `npx eslint . --max-warnings 0` MUST pass — enforced via `.github/workflows/lint-web.yml`. New `// eslint-disable-*` comments are BLOCKED except where structurally inapplicable + tracking issue filed (per Shard D brief).
