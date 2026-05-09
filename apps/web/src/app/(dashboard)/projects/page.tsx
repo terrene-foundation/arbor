@@ -245,7 +245,7 @@ export default function ProjectsPage() {
     try {
       const data = await projectsApi.listProjects();
       // Normalize backend fields to frontend type (API returns budget_amount, is_archived)
-      const normalized = (data.projects ?? []).map((p: any) => ({
+      const normalized: Project[] = (data.projects ?? []).map((p) => ({
         ...p,
         status: p.status || (p.is_archived ? "archived" : "active"),
         code: p.code || "",

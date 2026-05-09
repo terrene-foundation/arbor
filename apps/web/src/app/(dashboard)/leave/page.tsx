@@ -864,7 +864,7 @@ export default function LeavePage() {
         leaveApi.listTypes(),
         leaveApi.listApplications(),
       ]);
-      setLeaveTypes(typesRes.types ?? (typesRes as any).leave_types ?? []);
+      setLeaveTypes(typesRes.types ?? typesRes.leave_types ?? []);
       setApplications(appsRes.applications ?? []);
 
       if (!isAdmin) {
@@ -1000,7 +1000,7 @@ export default function LeavePage() {
             </p>
           ) : (
             <div className="space-y-3">
-              {leaveTypes.map((lt: any) => (
+              {leaveTypes.map((lt) => (
                 <div
                   key={lt.id || lt.name || lt.leave_type_name}
                   className="flex items-center justify-between p-3 rounded-lg border border-[var(--color-gray-200)] bg-[var(--color-surface-card)]"
