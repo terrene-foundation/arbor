@@ -59,6 +59,24 @@ notes: |
   emit-coc.mjs and emit.mjs must be run WITHOUT --target in this repo (the tool says so
   explicitly); emit.mjs needs --out <dir> since it defaults to a /tmp path.
 
+  KNOWN CONSTRAINT — .github/workflows/validate.yml is CONSUMER-SCOPED, not the
+  verbatim sister copy. migrate.md Step 7 says to copy the sister's workflows, but
+  that instruction is written for the template axis: 3 of its 4 steps are
+  structurally inapplicable to a coc-project consumer and the workflow FAILED on
+  first CI run (PR #44). Dropped, each with the reason recorded in the file's own
+  header banner: (a) the image-pin gate wants the COC dev-container scaffold
+  (docker-compose.yml / .devcontainer/ / bin/dev), which the multi_cli_overlays
+  path set does not deliver to a consumer — reported MISSING on all three;
+  (b) the cross-reference ratchet pins a baseline count measured on the TEMPLATE
+  tree, which Arbor's differs from by construction; (c) the undeclared-top-level
+  gate parses the distribution manifest that Validator 16 forbids here, so it
+  fails closed AND would flag Arbor's own app roots. The retained "Validate
+  structure" step is the one that actually guards this migration (three CLI
+  baselines present + no off-allowlist SDK-source leak into .claude/).
+  Next session: /sync-from-template re-copies the upstream file and re-breaks CI.
+  The durable fix is UPSTREAM — class-conditional steps in kailash-coc-py's
+  validate.yml keyed on repo class. Worth filing at terrene-foundation/terrene.
+
   SDK pins deliberately UNCHANGED (migrate.md: "SDK pins are preserved throughout").
   .claude/VERSION.upstream.sdk_packages still records Arbor's actual pins (kailash 2.12.0
   etc.), NOT the template's declared set (kailash 2.62.0 etc.). Upgrading is a separate,
