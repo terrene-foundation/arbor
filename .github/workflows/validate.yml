@@ -32,10 +32,18 @@ name: Validate COC Structure
 # migration: it asserts all three CLI baselines exist and that no SDK-source
 # reference leaks into .claude/ off-allowlist.
 #
-# DRIFT WARNING: the next `/sync-from-template` re-copies the upstream file
-# and will re-break CI here. The durable fix is upstream — class-conditional
-# steps in kailash-coc-py's validate.yml, skipping the template-only steps
-# when the repo class is `coc-project`. Recorded in .claude/.coc-sync-marker.
+# STABILITY: this trim does NOT get reverted by a routine sync. validate.yml
+# is absent from the upstream sync-manifest.yaml (no distribution contract),
+# `/sync-from-template` touches no `.github/` path, and `/migrate --refresh`
+# explicitly skips the Step-7 workflow refresh. Only a fresh full `/migrate`
+# would re-copy it, and this repo is already `template_type: multi-cli`, so
+# `/migrate` routes to `--refresh`.
+#
+# The upstream defect is still real — every consumer's first post-`/migrate`
+# CI run goes red. Fix belongs upstream in kailash-coc-py: gate the three
+# template-only steps on repo class (the template already ships
+# `.claude/bin/repo-class.mjs`, which resolves it from `.claude/VERSION`).
+# Recorded in .claude/.coc-sync-marker.
 # ─────────────────────────────────────────────────────────────────────────
 
 on:

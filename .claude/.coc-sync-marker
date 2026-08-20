@@ -73,9 +73,22 @@ notes: |
   fails closed AND would flag Arbor's own app roots. The retained "Validate
   structure" step is the one that actually guards this migration (three CLI
   baselines present + no off-allowlist SDK-source leak into .claude/).
-  Next session: /sync-from-template re-copies the upstream file and re-breaks CI.
-  The durable fix is UPSTREAM — class-conditional steps in kailash-coc-py's
-  validate.yml keyed on repo class. Worth filing at terrene-foundation/terrene.
+  CORRECTED 2026-08-20: an earlier version of this note claimed "/sync-from-template
+  re-copies the upstream file and re-breaks CI". That is FALSE and was asserted
+  without checking. Measured: validate.yml appears NOWHERE in the upstream
+  sync-manifest.yaml (so it has no distribution contract and /sync-to-use never
+  ships it), sync-from-template.md and the sync-flow skill's Downstream Sync
+  contain ZERO .github references, and migrate.md line 130 states --refresh
+  "Skips ... Step 7 GitHub workflow refresh" explicitly. The ONLY path that
+  re-copies it is a fresh full /migrate, which this repo will no longer take
+  (template_type is already multi-cli, so /migrate routes to --refresh). The trim
+  is therefore STABLE, not fragile drift.
+
+  The upstream defect is still real and still worth filing — it makes every
+  consumer's first post-/migrate CI run red. Route: terrene-foundation/kailash-coc-py
+  (the USE template this repo pulled from), per artifact-flow.md § Downstream-Consumer
+  Routing — NOT terrene-foundation/terrene, whose single-entrypoint rule governs the
+  terrene knowledge-base submodule tree, not the COC artifact lane.
 
   SDK pins deliberately UNCHANGED (migrate.md: "SDK pins are preserved throughout").
   .claude/VERSION.upstream.sdk_packages still records Arbor's actual pins (kailash 2.12.0
