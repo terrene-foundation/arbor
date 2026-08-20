@@ -407,7 +407,7 @@
     },
     {
       "path": "rules/CROSS-SDK-INSPECTION.md",
-      "sha256": "bc5838ffcafb2249462c4cd1bf55b41f8e1f5270d2df0a7e66c496a38dbada48"
+      "sha256": "8ccadb1cdb14868143ba9215b05712fcbc4423441a400d7e201528895a924a30"
     },
     {
       "path": "rules/DATAFLOW-CLASSIFICATION.md",
