@@ -44,10 +44,22 @@ class PythonCodeNodeTransformer(ast.NodeTransformer):
             other_args = []
 
             for keyword in node.keywords:
-                if keyword.arg == "code" and isinstance(keyword.value, ast.Str):
-                    code_arg = keyword.value.s
-                elif keyword.arg == "name" and isinstance(keyword.value, ast.Str):
-                    name_arg = keyword.value.s
+                # ast.Str / .s were removed in Python 3.12 (deprecated aliases since
+                # 3.8). ast.Constant carries any literal, so the isinstance MUST also
+                # check the payload type — a bare ast.Constant would match ints, None,
+                # and bools, which ast.Str never did.
+                if (
+                    keyword.arg == "code"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ):
+                    code_arg = keyword.value.value
+                elif (
+                    keyword.arg == "name"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ):
+                    name_arg = keyword.value.value
                 else:
                     other_args.append(keyword)
 
@@ -73,10 +85,10 @@ class PythonCodeNodeTransformer(ast.NodeTransformer):
                         ast.keyword(
                             arg="func", value=ast.Name(id=func_name, ctx=ast.Load())
                         ),
-                        ast.keyword(arg="name", value=ast.Str(s=name_arg)),
+                        ast.keyword(arg="name", value=ast.Constant(value=name_arg)),
                         ast.keyword(
                             arg="description",
-                            value=ast.Str(s="Auto-converted from string code"),
+                            value=ast.Constant(value="Auto-converted from string code"),
                         ),
                     ]
                     + other_args,

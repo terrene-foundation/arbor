@@ -21,13 +21,13 @@ classifiers = [
 ]
 dependencies = [
     # Kailash SDK (includes: fastapi, uvicorn, pydantic, sqlalchemy, pandas, numpy, requests, pyyaml)
-    "kailash>=2.12.0",
-    "kailash-nexus>=2.3.0",
-    "kailash-dataflow>=2.4.0",
-    "kailash-kaizen>=2.13.1",
-    "kailash-pact>=0.11.0",
-    "kailash-mcp>=0.2.10",
-    "kaizen-agents>=0.9.4",
+    "kailash>=2.62.0",
+    "kailash-nexus>=2.15.0",
+    "kailash-dataflow>=2.19.1",
+    "kailash-kaizen>=2.45.0",
+    "kailash-pact>=0.18.0",
+    "kailash-mcp>=0.5.1",
+    "kaizen-agents>=0.12.0",
     # Terrene Foundation trust frameworks (bundled in src/ — not on PyPI)
     # "eatp>=0.2.0",
     # "trust-plane>=0.2.1",
@@ -56,6 +56,19 @@ dependencies = [
     "httpx>=0.27.0",
     # Encryption (OAuth token store, PII encryption)
     "cryptography>=42.0.0",
+    # Session store + JWT token blocklist. Imported lazily in
+    # api/session.py::_connect and api/middleware/token_blocklist.py, both
+    # behind try/except with a SILENT degrade: no redis => in-memory sessions
+    # (lost on restart, broken across replicas) and a disabled token blocklist
+    # (revoked JWTs stay valid until expiry). Redis is part of the production
+    # stack, so this MUST be declared, not inherited transitively.
+    "redis>=5.0.0",
+    # PayNow QR generation (mcp_servers/adapters/paynow.py). Lazy import behind
+    # try/except whose fallback returns an EMPTY PNG placeholder — a blank QR
+    # is worse than an error, so the dependency is explicit. `pypng` backs
+    # qrcode.image.pure.PyPNGImage, which that adapter imports by name.
+    "qrcode>=7.4.0",
+    "pypng>=0.20220715.0",
     # Kailash runtime transitive deps (not declared by kailash core on PyPI)
     "aiohttp>=3.9.0",
     "mcp>=1.0.0",

@@ -64,7 +64,11 @@ def _parse_models(filepath: Path) -> dict[str, dict]:
 
         for item in node.body:
             # Skip the docstring node
-            if isinstance(item, ast.Expr) and isinstance(item.value, (ast.Constant, ast.Str)):
+            # ast.Str was an alias for ast.Constant since 3.8 and was REMOVED in
+            # Python 3.12; referencing it raises AttributeError on 3.12+. This repo
+            # runs 3.14 (.python-version), so ast.Constant alone is both correct and
+            # the only form that resolves.
+            if isinstance(item, ast.Expr) and isinstance(item.value, ast.Constant):
                 continue
 
             # Annotated assignment: field_name: type = default
