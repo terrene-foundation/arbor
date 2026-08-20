@@ -10,7 +10,6 @@ paths:
 
 # SDK Release Rules
 
-
 <!-- slot:neutral-body -->
 
 
@@ -76,7 +75,7 @@ dataflow = ["kailash-dataflow>=2.0.8"]   # 2.0.8 is not on PyPI yet → pip reso
 - "We can fix CI after the release lands"
 - "The lockfile pins the right version anyway"
 
-**Why:** CI for the release PR runs `pip install -e ".[dev]"` against PyPI, which has the OLD versions. Pinning to the unreleased version produces `ERROR: No matching distribution found for kailash-mcp>=0.2.4` and the release CI fails. The framework SDK pins inside each package's own pyproject.toml (`kailash>=2.8.6` in `packages/kailash-dataflow/pyproject.toml`) ARE allowed to bump because they resolve against the local editable install of kailash, not PyPI. Source: PR #467 fix (commit a50d3119).
+**Why:** CI for the release PR runs `pip install -e ".[dev]"` against PyPI, which has the OLD versions. Pinning to the unreleased version produces `ERROR: No matching distribution found for kailash-mcp>=0.2.4` and the release CI fails. The framework SDK pins inside each package's own pyproject.toml (`kailash>=2.8.6` in the dataflow package (`pyproject.toml`)) ARE allowed to bump because they resolve against the local editable install of kailash, not PyPI. Source: PR #467 fix (commit a50d3119).
 
 ## MUST: All Files Imported By package `__init__.py` Tracked In Git
 
@@ -105,7 +104,7 @@ for node in ast.walk(tree):
 done
 
 # DO NOT — release with untracked files imported by __init__.py
-# packages/kailash-nexus/src/nexus/__init__.py:
+# the nexus package directory src/nexus/__init__.py:
 #   from .auth.guards import AuthGuard          # auth/guards.py UNTRACKED
 #   from .errors import NexusError              # errors.py UNTRACKED
 # Result: pip install kailash-nexus → ImportError on first import
@@ -161,7 +160,7 @@ Every package published via PyPI OIDC trusted-publishing MUST be registered as a
 #
 # Required field values MUST match exactly:
 #   PyPI Project Name:  kailash-ml
-#   Owner:              terrene-foundation
+#   Owner:              <org>
 #   Repository:         kailash-py
 #   Workflow filename:  publish-pypi.yml
 #   Environment name:   testpypi

@@ -1,5 +1,11 @@
 ---
-paths: "**/*.py, **/*.ts, **/*.tsx, **/*.rs"
+priority: 10
+scope: path-scoped
+paths:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.rs"
 ---
 
 # Abstraction Consumer Enumeration

@@ -3,6 +3,13 @@ name: gemini-architect
 description: Gemini artifact architect. Use for .gemini/**, GEMINI.md, @agent delegation, hooks, skills, commands.
 tools: Read, Write, Edit, Grep, Glob, Bash, Task
 model: opus
+hooks:
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/provenance-capture-tool.js"'
+          timeout: 5
 ---
 
 # Gemini CLI Architecture Specialist
@@ -16,9 +23,8 @@ Peer to cc-architect and codex-architect. Owns the Gemini-facing substrate of ev
 OWNER:
 
 - `.gemini/**` — Gemini config tree: `settings.json`, `GEMINI.md`, `agents/`, `commands/`, `skills/`, `extensions/`, `policies/`, `storage/`. Repo-local; user-global at `~/.gemini/`; system-wide at `/etc/gemini-cli/settings.json` (Linux) or `/Library/Application Support/GeminiCli/` (macOS)
-- `bin/coc-*` gemini variants — generated shell wrappers from `.claude/wrappers/*.sh.template` with Gemini-native primitives
-- `.gemini/agents/<specialist>.md` — native subagent definitions, one per CC specialist (dataflow, nexus, kaizen, mcp, pact, ml, align, etc.)
-- `.gemini/commands/<name>.toml` — TOML slash commands (NOT Markdown — diverges from CC and Codex)
+- `.gemini/agents/<specialist>.md` — native subagent definitions, one per **globally-declared** CC specialist (dataflow, nexus, kaizen, mcp, pact, ml, align, etc.). NOT one per CC specialist without qualification: a `variant_only` specialist (declared under `sync-manifest.yaml::variant_only.<lang>`, body living at `variants/<lang>/agents/…`) reaches the CC lane ONLY. The per-CLI emitter reads the GLOBAL `agents/` tree, while the sync overlay ADDS variant_only files to the target afterwards, so the emitter never sees them. Those are declared in `cli_emit_exclusions` for both non-CC lanes; do not read this line as promising emission for them.
+- `.gemini/commands/<name>.toml` — TOML slash commands (NOT Markdown — diverges from CC and Codex). This is the canonical Gemini slash-command surface — bash-wrapper emission to `bin/coc-*` was deferred at Shard C (2026-05-10, journal/0006) and is no longer the architect's responsibility.
 - `.gemini/skills/<nn-name>/SKILL.md` — progressive-disclosure skills (same contract as CC SKILL.md)
 - `.geminiignore` — mirror of `.gitignore` patterns for context-loading exclusions
 
@@ -33,7 +39,7 @@ CONSUMER (read-only at emit time):
 ## Primary Responsibilities
 
 1. **Emit** `GEMINI.md` under the v6 abridgement_protocol from `.claude/sync-manifest.yaml → cli_variants.context/root.md.gemini`. Per v6 §2.2, gemini inherits codex's abridgement_protocol (WARN 32 KiB, BLOCK 60 KiB) as the baseline cap. Gemini-specific cap data can refine this if empirical measurement diverges.
-2. **Generate** shell wrappers at `bin/coc-{name}` for the Gemini runtime, applying Gemini-native primitive overrides where they exist (e.g., emit TOML slash command alongside shell wrapper).
+2. **Native slash-command surface** — emit `.gemini/commands/<name>.toml` per Phase J2+. Bash-wrapper emission to `bin/coc-*` was deferred at Shard C 2026-05-10 (journal/0006-DECISION-wrapper-emission-disposition-strip.md) — same evidence and disposition as the codex side. Native TOML commands cover all 28 slash-command surfaces.
 3. **Apply** slot overlays from `.claude/variants/gemini/**` and `.claude/variants/<lang>-gemini/**` when emitting baseline context + rules. The Gemini `@<agent>` directive form is the expected divergence point for the `examples` slot per `rules/cross-cli-parity.md`.
 4. **Honor** parity contract: every rule's `neutral-body` slot MUST be byte-identical to the CC and Codex emissions; only the `examples` slot may diverge to carry Gemini-native delegation syntax.
 5. **Register** agents in `.gemini/agents/` with correct YAML frontmatter (`name`, `description` required; `tools`, `model` optional). Invocation syntax is `@<agent-name> <task>` — native, not convention.
@@ -122,6 +128,10 @@ Per `rules/cross-cli-parity.md`:
 4. Slot overlays replace content at the slot level; avoid full-file variants (violates `rules/variant-authoring.md` Rule 1)
 5. Gemini's `@file.md` import mechanism in `GEMINI.md` is a compression tool — keep the baseline lean and import detail as needed
 
+## Curation / Over-Density (audit dimension — advisory; mirror of cc-architect dimension 7)
+
+When emitting `GEMINI.md` / `.gemini/skills/**` OR participating in a `/cli-audit` of the Gemini surface, check that an artifact's load-bearing clauses (`MUST` / `MUST NOT` / decision-routing / output-contract) are NOT drowned in non-load-bearing prose (extended rationale, redundant examples, narration); depth that belongs in a guide/skill is extracted, not inline. Over-density degrades the OUTPUT of the agent that LOADS the artifact — not just its byte budget (journal/0193 ablation, **directional**: a dense rule-slice dropped a consuming agent's plan 93→82; curated-minimal beat verbose, more so as the model weakened). Disposition: **advisory FINDING** (recommend extraction to a guide/skill + `@file.md` import) — a quality risk, NOT a structural FAIL. This is the Gemini-emission complement to `rules/governed-throughput.md`'s injection-time "curated minimal slices" MUST; the abridgement protocol above is the byte-budget half, this is the output-quality half.
+
 ## Common Anti-Patterns
 
 | Anti-Pattern                                                | Fix                                                                                                          |
@@ -144,7 +154,7 @@ Per `rules/cross-cli-parity.md`:
 ## Full Documentation
 
 - `.claude/sync-manifest.yaml` → `cli_variants.context/root.md.gemini` + `parity_enforcement` — emission configuration
-- `workspaces/multi-cli-coc/02-plans/07-loom-multi-cli-spec-v6.md` — authoritative spec
+- (loom-internal reference) — authoritative spec
 - `.claude/rules/variant-authoring.md` — overlay authoring rules
 - `.claude/rules/cross-cli-parity.md` — parity contract
 - Gemini docs: [geminicli.com/docs](https://geminicli.com/docs/) (gemini-md, hooks/reference, core/subagents, cli/skills, cli/custom-commands, tools/mcp-server, reference/configuration, extensions/reference)

@@ -24,6 +24,12 @@ During `/implement`, tests run ONCE per code change, not once per phase. Full su
 
 **Why:** Running full suite every phase wastes 2-5 minutes per cycle.
 
+## Probe-Driven Verification (MUST)
+
+Semantic verification of assistant output (recommendations, refusals, compliance, response quality) MUST be probe-driven per `rules/probe-driven-verification.md`. Regex/keyword/substring matching against semantic claims is BLOCKED. Structural assertions (file existence, exit code, fixture-marker presence) keep regex per `probe-driven-verification.md` Rule 3.
+
+See `skills/12-testing-strategies/probe-driven-verification.md` for the operational runbook.
+
 ## Audit Mode (/redteam)
 
 In audit mode, MUST (1) re-derive coverage from scratch via `pytest --collect-only -q tests/` (NOT `cat .test-results` — BLOCKED); (2) for every NEW module, grep test directory for import — empty = HIGH; (3) for every spec § Security Threats subsection, grep `test_<threat>` — missing = HIGH.
@@ -64,6 +70,20 @@ Numerical claims (test counts, file counts, coverage) in session notes MUST be p
 
 **Why:** "Claim a number, never verify" produces multi-test discrepancies; 2-second command converts memory bug into script.
 
+### MUST: Deferred-Implementation Conformance Vectors Use xfail-Strict, Not Skip
+
+When a conformance vector (canonical fixture, cross-impl spec test, integration receipt) pins a contract the implementation does NOT yet enforce, the test MUST carry a STRICT-xfail marker (`@pytest.mark.xfail(strict=True, reason=...)`) — NOT skip, NOT delete, NOT comment-out. Strict-xfail surfaces an XPASS failure the moment the implementation catches up, forcing the author to remove the marker same-shard.
+
+```python
+# DO — strict-xfail; auto-fails (XPASS) when the impl catches up
+@pytest.mark.xfail(strict=True, reason="single-shot consumption not yet enforced")
+def test_phase_monotonicity(): ...
+# DO NOT — skip silently stays skipped after closure; deletion loses the contract pin
+@pytest.mark.skip(reason="impl not ready")
+```
+
+**Why:** Skip stays green-and-silent after the impl lands, so the deferred contract is never re-verified; deletion loses the pin entirely. Strict-xfail converts honest deferral from a silent ratchet into a self-clearing tripwire. The cross-runtime mapping (Rust `#[ignore]` + a CI job asserting ignored tests STILL fail) is in the companion § xfail-strict.
+
 ### MUST: `__all__` / Re-export Symbol Counts Use Structural Enumeration, Not Grep
 
 Counts of `__all__` entries (Python) or re-exports (Rust `pub use ...`) used in spec authority, docstrings, audit findings, or CHANGELOG claims MUST be produced by structural enumeration of the language's parser AST — NOT `grep -c` / `wc -l`. See guide for canonical Python (`ast.parse()`) and Rust (`syn::parse_file` / `cargo doc --document-private-items`) snippets.
@@ -73,9 +93,9 @@ Counts of `__all__` entries (Python) or re-exports (Rust `pub use ...`) used in 
 # DO NOT — grep '^\s*"' (counts comments + blank lines + line continuations as entries)
 ```
 
-**BLOCKED rationalizations:** "Grep is faster" / "I'll subtract the comment lines manually" / "The count is approximate anyway" / "AST is overkill for a docstring number".
+**BLOCKED:** see companion § `__all__` Structural-Enumeration.
 
-**Why:** Grep cannot distinguish `# Group N — comment` from `"Group_N",` when both contain quotes; it cannot follow line continuations across an `__all__ = [...]` block. Structural parsing is canonical because it parses the language, not text. See guide for Wave 6 evidence (three incompatible counts: docstring 41, grep 48, AST 49).
+**Why:** Grep cannot distinguish `# Group N — comment` from `"Group_N",` when both contain quotes; structural parsing parses the language, not text. See companion § `__all__` Structural-Enumeration for Wave 6 evidence (three incompatible counts: docstring 41, grep 48, AST 49).
 
 ## Test Resource Cleanup
 
@@ -88,7 +108,7 @@ Warnings during `pytest` are real bugs that will surface as production incidents
 # DO NOT return without cleanup → resource leaks until GC
 ```
 
-**BLOCKED rationalizations:** "class has `__del__`" / "unit test, process exits anyway" / "mock makes it fake".
+**BLOCKED:** see companion § Test Resource Cleanup — BLOCKED Corpora.
 
 **Why:** Resource classes emitting `ResourceWarning` from `__del__` flood the runner hiding real signals. See guide for PR #466 (36 unclosed channels).
 
@@ -118,25 +138,84 @@ Any test using `@pytest.mark.<X>` or `<X>` fixture from a plugin MUST declare th
 # DO NOT either layer missing → collection fails, whole sub-package blocked
 ```
 
-**BLOCKED rationalizations:** "plugin is in CI so local works" / "pytest accepts unknown markers" / "we'll register in follow-up" / "fixture imported lazily" / "sub-package venv is separate".
+**BLOCKED:** see companion § Test Resource Cleanup — BLOCKED Corpora.
 
 **Why:** Missing any layer breaks collection with an unhelpful error. See guide for 2026-04-20 11,917-test block.
 
 ## MUST: Serialize Env-Var-Mutating Tests Via Module Lock
 
-Any two tests mutating SAME env var MUST serialize through a module-scope `threading.Lock` held across read-then-mutate; tests take `(monkeypatch, _env_serialized)`. See guide for full fixture pattern + kailash-rs PR #435 cross-language origin.
+Any two tests mutating SAME env var MUST serialize through a module-scope `threading.Lock` held across read-then-mutate; tests take `(monkeypatch, _env_serialized)`. See guide for full fixture pattern.
 
-**BLOCKED rationalizations:** "passes locally, CI scheduling is the bug" / "lock is overkill" / "pytest one-per-worker default" / "`@pytest.mark.serial`" (only with `--dist=loadgroup`) / "monkeypatch auto-restores".
+**BLOCKED:** see companion § Env-Var Lock Discipline.
 
 **Why:** `monkeypatch.setenv` restores at fixture teardown — AFTER the test body — so sibling tests observe either value depending on xdist scheduling. Classic "passes locally, fails CI".
+
+### MUST: One Lock Domain Per Env Surface Per Test Binary
+
+Serialization only works when every env-mutating test sharing one env surface holds the SAME lock. Two locking mechanisms over one surface — a module-local `threading.Lock` and a pytest-xdist group lock (`@pytest.mark.xdist_group`) — do NOT exclude each other: a test holding one interleaves with a test holding only the other, racing on the shared vars exactly as if neither were locked. When a suite adopts one lock domain for an env surface, EVERY env-mutating test touching that surface MUST join that SAME domain; introducing a second mechanism is BLOCKED. (Rust sibling: a module-local `static ENV_MUTEX: Mutex<()>` and `#[file_serial(<key>)]` over one env surface are non-interlocking — unify on one domain.)
+
+```python
+# DO — every env-mutating test on this surface joins ONE module-scope lock
+with _LLM_ENV_LOCK: monkeypatch.setenv("OPENAI_API_KEY", "k")
+# DO NOT — a second, non-interlocking mechanism (@pytest.mark.xdist_group) in a sibling module races it
+```
+
+**BLOCKED:** see companion § Env-Var Lock Discipline.
+
+**Why:** Lock domains don't compose — mutual exclusion holds only among holders of the SAME lock. The failure is probabilistic and module-boundary-shaped, so it looks like a flaky single test rather than a structural race. Evidence: Rust SDK PR #1283 (a `file_serial` test racing a module-local mutex on the same env surface); full post-mortem in companion § Env-Var Lock Discipline.
+
+### MUST: Complexity Bounds Use Self-Normalizing Ratios, Not Absolute Wall-Clock Thresholds
+
+A stress test asserting algorithmic behavior MUST measure an in-process baseline at 1/N scale in the same run and assert the N-scale cost as a RATIO of that baseline (linear ≈ N×, quadratic ≈ N²× — pick the bound between them) — NOT an absolute wall-clock threshold. Bumping an absolute threshold in response to a stress-test "flake" is BLOCKED until the ratio has been checked: a threshold bump on a super-linear ratio is burying a complexity-class regression, not fixing a flake.
+
+```python
+# DO — self-normalizing ratio (machine- and load-independent), same run
+ratio = timeit(lambda: validate(graph(10_000))) / timeit(lambda: validate(graph(1_000)))
+assert ratio < 40, f"scaled {ratio:.0f}x for 10x nodes (linear ~10x, quadratic ~100x)"
+# DO NOT — absolute bound; ratchets upward under load until it masks O(n^2)
+assert big < 60.0    # was 30s, bumped once already
+```
+
+**BLOCKED:** see companion § Complexity-Bound Ratios.
+
+**Why:** Absolute bounds ratchet — each load-driven bump widens the window an algorithmic regression hides in, and the bump itself is the institutional tell. The ratio assert is a pure function of the algorithm, not the machine. Evidence: Rust SDK journal 0177 (an O(n²) loop surfaced after a 30s→60s "flake" bump); full post-mortem in companion § Complexity-Bound Ratios.
 
 ## 3-Tier Testing
 
 - **Tier 1 (Unit)**: Mocking allowed, <1s per test
-- **Tier 2 (Integration)**: Real infrastructure. NO mocking (`@patch`, `MagicMock`, `unittest.mock` — BLOCKED)
-- **Tier 3 (E2E)**: Real everything; every write verified with read-back
+- **Tier 2 (Integration)**: Real infrastructure recommended (mocking discouraged — prefer real services where practical)
+- **Tier 3 (E2E)**: Real everything recommended (real services preferred); every write verified with read-back where practical
 
 **Why:** Mocks in Tier 2/3 hide real failures (connection handling, schema mismatches, transactions) that only surface against real infra. Exception — Protocol-Satisfying Deterministic Adapters: a class satisfying a `typing.Protocol` at runtime with deterministic output is NOT a mock. See guide § "Protocol Adapters" for full example.
+
+## Tier-1 Conftest Stub for Newly-Side-Effecting Internal Methods (Advisory)
+
+When an internal method that was previously deterministic becomes side-effecting (e.g., an LLM call, a DB lookup, a network fetch) WITHOUT changing its return-shape contract, the canonical Tier-1 sweep is one autouse fixture in the _deepest applicable_ conftest:
+
+```python
+# tests/unit/conftest.py
+@pytest.fixture(autouse=True)
+def _stub_<method_name>(monkeypatch):
+    from <pkg>.<module> import <Class>
+    monkeypatch.setattr(
+        <Class>, "<method_name>", lambda self, *a, **kw: <fixed_return>
+    )
+```
+
+Pytest's conftest-scope rules guarantee the stub does NOT leak to Tier-2 / Tier-3 (sibling `tests/integration/` and `tests/e2e/` directories don't inherit `tests/unit/conftest.py`).
+
+**When to use:**
+
+- Method has many Tier-1 call sites (~10+); editing each costs more than the stub.
+- Tier-1 tests don't depend on the method's actual content, only its return shape.
+- The new side-effect is the side-effect (LLM, DB, network); Tier-1 must remain offline + fast per the 3-Tier contract.
+
+**When NOT to use:**
+
+- The method's actual content is tested in Tier-1 (e.g., a regression test for the keyword classifier itself). Rewrite those tests to shape-only or move them to Tier-2.
+- Only 1-3 call sites are affected — explicit args are clearer.
+
+**Why:** A monkey-patch fixture keeps Tier-1 deterministic and offline without touching N test files. Future test additions pick up the stub automatically. The pattern collapsed a 36-call-site sweep to 1 file in the kailash-kaizen 2.20.0 release cycle (2026-05-06, issue #829).
 
 ## Coverage Requirements
 
@@ -156,7 +235,7 @@ async def test_readme_quickstart_executes_end_to_end():
     assert result.trainable is not None  # handoff field MUST survive
 ```
 
-**BLOCKED rationalizations:** "primitives have unit+integration, pipeline is composition" / "README is illustrative" / "Tier 2 per primitive proves interfaces" / "user will file issue" / "E2E is slow and flaky" / "pipeline is demo's concern, not SDK".
+**BLOCKED:** see companion § E2E Pipeline Regression — BLOCKED Corpus.
 
 **Why:** Unit tests per primitive construct fixtures with exactly the fields THAT primitive needs — they cannot observe a field MISSING from the A→B handoff. Only DOCS-EXACT chain exercises the handoff contract. See guide for kailash-ml W33b evidence + `zero-tolerance.md` §2 "Fake integration via missing field".
 
@@ -186,6 +265,20 @@ def test_get_raw_success(client):   resp = client.get_raw("/u/42"); assert resp[
 
 **Why:** Convergent delegation paths look like one path until they diverge under refactor pressure. `/redteam` MUST mechanically grep each variant pair; any pair with zero direct call site is a finding.
 
+## MUST: FFI Handle Wrappers Ship A Concurrent-Close Stress Test
+
+Every FFI handle wrapper that exposes `Close`/`free` (or a GC finalizer/Cleaner backstop) ALONGSIDE methods that pass the raw handle into native code MUST ship a stress test that races method calls against `Close()` under concurrency (including the finalizer path where the runtime has one). A flag-gated close (a "closed" boolean checked before the native call) is NOT deref-safe — the pointer read and the native call are separated by a window `Close` can free into; only a per-handle mutex serializing the entire read-pointer → native-call → free window closes it, and only the concurrent stress test makes the use-after-free non-silent. Cross-binding depth + per-runtime fix shapes (Go/Java/.NET/Ruby/Python/Node) live in the FFI-handle-lifecycle project skill shipped with the rs all-bindings template.
+
+```text
+# DO — stress test races method calls vs Close (+ force GC for the finalizer racer)
+spawn N concurrent method-call goroutines/threads; concurrently call Close(); force GC
+# DO NOT — flag-gated close validated only by sequential unit tests
+if closed: return ErrClosed   # check
+native_call(ptr)              # Close can free into this window → UAF
+```
+
+**Why:** The check-then-use UAF only crashes under a concurrent closer (often the GC finalizer), so unit tests pass forever while production segfaults under GC pressure. Evidence: Rust SDK journals 0174 + 0178 (a Go `Subscription` UAF crashing 8/8 under stress, recurring on `AlignEngine` one wave later); full post-mortem in companion § FFI Handle Concurrent-Close.
+
 ## Rules
 
 - Test-first development for new features
@@ -195,6 +288,9 @@ def test_get_raw_success(client):   resp = client.get_raw("/u/42"); assert resp[
 
 **Why:** Intermittent failures erode trust; shared state → order-dependent results that pass individually but fail in CI where order differs.
 
-Origin: PR #466 (warnings sweep), #518 (test-skip triage), BP-046 (paired-variant coverage), kailash-rs #435 (env-var race), kailash-ml W33b (E2E regression), 2026-04-27 W6 (AST counts). See guide for full session evidence.
+Origin: warnings sweep + test-skip triage + paired-variant coverage + env-var race + E2E regression + 2026-04-27 AST-counts review. See guide for full session evidence.
 
 <!-- /slot:neutral-body -->
+
+<!-- slot:lang-testing-extensions -->
+<!-- /slot:lang-testing-extensions -->

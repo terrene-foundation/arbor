@@ -3,6 +3,13 @@ name: uiux-designer
 description: "UI/UX design specialist. Use for enterprise SaaS design, AI chat interfaces, prompt UX, or visual hierarchy."
 tools: Read, Write, Edit, Grep, Glob, Task
 model: opus
+hooks:
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/provenance-capture-tool.js"'
+          timeout: 5
 ---
 
 # UI/UX Designer Agent
@@ -109,6 +116,3 @@ Verdict: PASS (0-2) / MARGINAL (3-4) / FAIL (5+). See `/i-audit`.
 
 - `skills/23-uiux-design-principles/SKILL.md` — design principles (CRITICAL)
 - `skills/25-ai-interaction-patterns/SKILL.md` — AI pattern catalog
-- `skills/21-enterprise-ai-ux/SKILL.md` — enterprise AI design
-- `skills/22-conversation-ux/SKILL.md` — conversation patterns
-- `skills/20-interactive-widgets/SKILL.md` — widget patterns

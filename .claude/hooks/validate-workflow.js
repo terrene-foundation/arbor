@@ -17,6 +17,9 @@
  *   other = non-blocking error
  */
 
+// SWEEP-EXEMPT-STUB-MARKERS: this file IS the stub-marker detector; literal strings are detection patterns, not stubs.
+// See .claude/audit-fixtures/sweep-stub-marker-false-positives/README.md for the convention.
+
 const fs = require("fs");
 const path = require("path");
 const { parseEnvFile, getModelProvider } = require("./lib/env-utils");
@@ -34,20 +37,59 @@ const timeout = setTimeout(() => {
 let input = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => (input += chunk));
+const { instructAndWait: _iaw } = require("./lib/instruct-and-wait");
+
 process.stdin.on("end", () => {
   clearTimeout(timeout);
   try {
     const data = JSON.parse(input);
     const result = validateFile(data);
-    console.log(
-      JSON.stringify({
-        continue: result.continue,
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          validation: result.messages,
-        },
-      }),
-    );
+    // If the validator decided to block (exitCode 2), route through
+    // instruct-and-wait for canonical halt-and-report shape (PostToolUse can't
+    // truly block; surface clear REPORT/THEN to agent + stderr summary to user).
+    if (result.exitCode === 2 || result.continue === false) {
+      const filePath = data.tool_input?.file_path || "(unknown file)";
+      const msgs = Array.isArray(result.messages)
+        ? result.messages
+        : [result.messages];
+      const blocked = msgs.filter((m) => /^BLOCKED:/.test(String(m)));
+      const out = _iaw({
+        hookEvent: "PostToolUse",
+        severity: "halt-and-report",
+        what_happened: `validate-workflow detected ${blocked.length} blocked pattern(s) in ${filePath}`,
+        why: "validate-workflow.js — stub / hardcoded-model / mock-data / fake-impl detection",
+        agent_must_report: blocked
+          .slice(0, 8)
+          .map((m) => String(m).slice(0, 240)),
+        agent_must_wait:
+          "Do not commit or proceed with related work until each blocked pattern is removed or replaced.",
+        user_summary: `validate-workflow: ${blocked.length} blocked pattern(s) in ${filePath.split("/").pop()}`,
+      });
+      console.log(JSON.stringify(out.json));
+      process.exit(out.exitCode);
+      return;
+    }
+    // Advisory / clean path. Non-blocking advisories reach the agent via
+    // additionalContext — the delivered PostToolUse field; the prior
+    // `validation` sibling was silently dropped (loom #466). Render the
+    // message list to text; emit no context block when there are none.
+    const advisory = { continue: result.continue };
+    const msgs = Array.isArray(result.messages)
+      ? result.messages
+      : result.messages
+        ? [result.messages]
+        : [];
+    if (msgs.length) {
+      advisory.hookSpecificOutput = {
+        hookEventName: "PostToolUse",
+        additionalContext: msgs
+          .map((m) =>
+            typeof m === "string" ? m : m && m.message ? m.message : String(m),
+          )
+          .join("\n"),
+      };
+    }
+    console.log(JSON.stringify(advisory));
     process.exit(result.exitCode);
   } catch (error) {
     console.error(`[HOOK ERROR] ${error.message}`);
@@ -589,7 +631,7 @@ function checkHardcodedKeys(content, filePath, messages) {
 
 /**
  * Detect mock/fake/generated data in frontend production code.
- * BLOCKING — frontend mock data is a stub. See rules/no-stubs.md.
+ * BLOCKING — frontend mock data is a stub. See rules/zero-tolerance.md.
  *
  * Patterns:
  *   - MOCK_*, FAKE_*, DUMMY_*, SAMPLE_* constants
@@ -653,7 +695,7 @@ function checkFrontendMockData(content, filePath, messages) {
         found.add("mock-constant");
         messages.push(
           `BLOCKED: Mock data constant "${name}" at ${path.basename(filePath)}:${i + 1}. ` +
-            `Replace with real API call. Frontend mock data is a stub (rules/no-stubs.md).`,
+            `Replace with real API call. Frontend mock data is a stub (rules/zero-tolerance.md).`,
         );
         hasBlocking = true;
       }
@@ -667,7 +709,7 @@ function checkFrontendMockData(content, filePath, messages) {
         found.add("mock-func-" + name);
         messages.push(
           `BLOCKED: Mock data generator "${name}" at ${path.basename(filePath)}:${i + 1}. ` +
-            `Replace with real API call. Frontend mock data is a stub (rules/no-stubs.md).`,
+            `Replace with real API call. Frontend mock data is a stub (rules/zero-tolerance.md).`,
         );
         hasBlocking = true;
       }
@@ -681,7 +723,7 @@ function checkFrontendMockData(content, filePath, messages) {
         found.add("mock-call-" + name);
         messages.push(
           `BLOCKED: Mock data generator call "${name}()" at ${path.basename(filePath)}:${i + 1}. ` +
-            `Replace with real API call. Frontend mock data is a stub (rules/no-stubs.md).`,
+            `Replace with real API call. Frontend mock data is a stub (rules/zero-tolerance.md).`,
         );
         hasBlocking = true;
       }
@@ -693,7 +735,7 @@ function checkFrontendMockData(content, filePath, messages) {
         found.add("math-random-display");
         messages.push(
           `BLOCKED: Math.random() generating display data at ${path.basename(filePath)}:${i + 1}. ` +
-            `Display data must come from real APIs, not random generators (rules/no-stubs.md).`,
+            `Display data must come from real APIs, not random generators (rules/zero-tolerance.md).`,
         );
         hasBlocking = true;
       }

@@ -1,32 +1,65 @@
-timestamp: 2026-04-29T00:00:00Z
-source: kailash-coc-claude-py (cache @ ~/.cache/kailash-coc/, refreshed via fetch+reset origin/main)
-template_version: 3.5.29
-previous_template_version: 3.5.25
+# COC Sync Marker — arbor (downstream consumer, multi-CLI)
+timestamp: 2026-08-20T05:10:26Z
+template: kailash-coc-py
+template_repo: terrene-foundation/kailash-coc-py
+template_type: multi-cli
+template_version: 1.23.0
+clis: ["claude", "codex", "gemini"]
 variant: py
-type: coc-project (downstream)
+type: coc-project (downstream consumer)
+migrated_from: kailash-coc-claude-py
+migrated_from_version: 3.5.29
+migrated_at: 2026-08-20T05:10:26Z
+loom_version: 2.45.0
+loom_sha: 0c663306
+stats:
+  baselines_emitted:
+    cc: 0 # CLAUDE.md is project-owned (3-way reconciled at Step 5), not emitted
+    codex: 1 # AGENTS.md — 58693B, emitted from this repo's own .claude/rules/
+    gemini: 1 # GEMINI.md — 58693B, emitted from this repo's own .claude/rules/
+  cli_artifacts:
+    codex: "prompts=74 skills=41" # 64 template + 10 Arbor project-agent prompts
+    gemini: "commands=42 skills=41 agents=32" # 22 template + 10 Arbor project agents
+  coc_derivative: "217 artifacts (rules=95 agents=36 skills=42 commands=44), coc.version 1.0.0, COC.lock present"
+  mcp_guard:
+    policies_populated: true # 3 policies, 2771B
+  merge:
+    written: 2842 # sister .claude/ files applied
+    purged: 31 # obsoleted entries removed (127 files); 0 unauthorized deletions
+    preserved_consumer_owned: 16
+    symlinks_recreated: 1 # .claude/codex-mcp-guard -> ../.codex-mcp-guard
+  hooks_resolving: "58/58"
+  settings_reconcile: "already canonical — deny rewrote 0 / deduped 0; 0 stale scripts/hooks refs"
+  disclosure_gate: "scan-synced-disclosure --check --root <sister> — 3791 files scanned / 0 findings, exit 0 (non-vacuous)"
 notes: |
-  Downstream /sync 3.5.25 -> 3.5.29 (4 template versions).
-  Cache was force-updated (loom 2.10.0 commit 3a91b79).
+  Full CC-only -> multi-CLI migration (kailash-coc-claude-py 3.5.29 -> kailash-coc-py 1.23.0),
+  per commands/migrate.md + skills/30-claude-code-patterns/multi-cli-migration.md.
 
-  Modified rules (4):
-    rules/zero-tolerance.md   (Rule 2 'Fake dispatch' bullet + new Rule 3c + new Rule 6a)
-    rules/schema-migration.md (new Rule 1a — /redteam grep for inline DDL)
-    rules/agents.md           (new MUST sub-clause — parallel brief-claim verification ≥3 issues)
-    rules/git.md              (in-flight from prior 2.9.7)
+  Consumer-owned artifacts preserved untouched: .claude/agents/project/ (10 Arbor agents),
+  .claude/skills/project/ (Arbor SKILL.md index + 15 project skills), .claude/learning/,
+  .claude/settings.local.json, and the 3 project-local rules
+  (abstraction-consumers, cross-sdk-inspection, upstream-patches).
 
-  Modified other:
-    commands/sync.md          (resolver protocol updates)
-    .coc-sync-marker          (loom-side stats — overwritten with downstream notes)
+  Fixed on discovery (zero-tolerance Rule 1): abstraction-consumers.md and
+  upstream-patches.md lacked the priority:/scope: frontmatter that rule-authoring.md
+  Rule 7 now requires; emit.mjs Validator 14 FAILed on both. Both are path-scoped ->
+  priority: 10 / scope: path-scoped, paths converted to list form. Validator 14 now PASSes.
 
-  Obsoleted purged: 0 (already clean).
-  No new files added this sync.
-  No new commands.
+  KNOWN CONSTRAINT — .claude/sync-manifest.yaml is intentionally ABSENT.
+  The sister ships it (multi_cli_overlays.manifest_distribute: true, for USE templates),
+  but emit.mjs Validator 16 FORBIDS it in a coc-project repo: a local manifest is a second
+  distribution source. It was removed after the per-CLI artifacts were emitted WITH it, so
+  the deployed .codex/ + .gemini/ trees correctly honor cli_emit_exclusions.
+  Consequence for the next session: re-running emit-cli-artifacts.mjs here WITHOUT the
+  manifest OVER-emits — it leaks CC-only artifacts (cc-audit, cc-architect,
+  30-claude-code-patterns, co-reference, infrastructure-specialist) onto the Codex/Gemini
+  surfaces, a cross-cli-parity.md defect. Per-CLI artifacts are a TEMPLATE-lane product;
+  a consumer receives them pre-emitted via /sync-from-template and should NOT re-emit
+  except to add its own project-local agents/skills (which is what this migration did).
+  emit-coc.mjs and emit.mjs must be run WITHOUT --target in this repo (the tool says so
+  explicitly); emit.mjs needs --out <dir> since it defaults to a /tmp path.
 
-  SDK pin bumps:
-    kailash         2.11.3 -> 2.12.0  (minor)
-    kailash-dataflow 2.3.2 -> 2.4.0   (minor)
-    kailash-ml      1.5.1  -> 1.6.0   (minor; tracked in VERSION map only — not pinned, Arbor doesn't import)
-    Others unchanged: nexus 2.3.0, kaizen 2.13.1, pact 0.11.0, mcp 0.2.10, kaizen-agents 0.9.4
-
-  uv sync clean (3 packages reinstalled). uv pip check clean (148 pkgs).
-  Hooks: 14 scripts in .claude/hooks/, 0 scripts/hooks/ refs in settings.json.
+  SDK pins deliberately UNCHANGED (migrate.md: "SDK pins are preserved throughout").
+  .claude/VERSION.upstream.sdk_packages still records Arbor's actual pins (kailash 2.12.0
+  etc.), NOT the template's declared set (kailash 2.62.0 etc.). Upgrading is a separate,
+  application-affecting decision — see the migration PR body.

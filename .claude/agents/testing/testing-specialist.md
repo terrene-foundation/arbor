@@ -3,6 +3,13 @@ name: testing-specialist
 description: "3-tier testing specialist with Playwright E2E. Use for test architecture, E2E generation, or infra compliance."
 tools: Read, Write, Edit, Bash, Grep, Glob, Task
 model: opus
+hooks:
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/provenance-capture-tool.js"'
+          timeout: 5
 ---
 
 # Testing Specialist Agent
@@ -22,6 +29,25 @@ When deployed by `/redteam` for test verification, MUST follow `rules/testing.md
 5. Run only NEW tests written by red team (E2E, regression for findings). If a test is suspected wrong, re-run THAT test specifically.
 
 See also: `skills/spec-compliance/SKILL.md` for the full audit protocol.
+
+## Probe-Driven Verification (MUST when authoring or auditing harnesses)
+
+Per `rules/probe-driven-verification.md` MUST-1, semantic verification of assistant output (refusal classification, recommendation quality, compliance with rule citation, outcome framing) MUST be probe-driven. Regex/keyword/substring scoring on assistant prose for these properties is BLOCKED. Structural assertions (file existence, exit code, marker presence, byte equality) keep regex per MUST-3.
+
+When authoring a NEW harness or test:
+
+- Classify each assertion as **structural** (regex acceptable) or **semantic** (probe required).
+- For semantic: define probe = (prompt template / verifier invocation, expected-answer schema, scoring rule). See `skills/12-testing-strategies/probe-driven-verification.md` for templates.
+- When LLM access is unavailable, emit `{passed: null, skipped: true, reason: "probe-unavailable"}` — never regex fallback.
+
+When auditing an EXISTING harness, run the mechanical sweep:
+
+```bash
+grep -rEn 'def (verify|score|assert|check|probe)_[A-Za-z_]*(recommend|refus|complian|respons|intent|semantic|quality|outcome|narrative|reasoning)' tests/ .claude/test-harness/ \
+  | xargs -I {} grep -lE 'kind:\s*"contains"|re\.(search|match|findall)|str\.contains' {} 2>/dev/null
+```
+
+Each hit MUST have a probe definition; missing probe = HIGH. For migration of legacy regex harnesses, see `.claude/test-harness/README.md` § Probe-driven migration plan (grace deadline 2026-05-20 per `probe-driven-verification.md` MUST-5).
 
 ## 3-Tier Strategy
 

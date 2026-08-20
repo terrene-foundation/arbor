@@ -20,7 +20,7 @@ paths:
 
 ## Scope
 
-ALL sessions in BUILD repos (`kailash-py`, `kailash-rs`) that merge code to main. Does NOT apply to downstream USE projects (template repos, application repos, external consumers) — those consume BUILD artifacts via PyPI and do not run `/release`.
+ALL sessions in a BUILD repo (the SDK source repo this rule ships to) that merge code to main. Does NOT apply to downstream USE projects (template repos, application repos, external consumers) — those consume BUILD artifacts via PyPI / crates.io / gems and do not run `/release`.
 
 ## ABSOLUTE: "Done" Means Released, Not Merged
 
@@ -57,6 +57,48 @@ done
 
 **Why:** Sibling packages drift over time — each session addresses its own PR's package and leaves siblings behind. The downstream consumer experiences a compounding gap. Closing siblings opportunistically (every session that releases anything sweeps every stale package) is the only way the gap converges to zero.
 
+### 1a. Carve-Out — Test-Only / Docs-Only / Workspace-Only Diffs
+
+A PR whose diff is **strictly test-only**, **strictly docs-only**, or **strictly workspace-only** MAY merge without `/release` because the diff produces no consumer-visible artifact change — PyPI version remains identical, the wheel content is identical, downstream installs see no change. The carve-out applies if AND ONLY IF every changed file matches one of:
+
+- `tests/**` or `**/tests/**` — Tier 1/2/3 tests under any test directory tree
+- `docs/**` — published documentation
+- `workspaces/**` — agent session records (briefs, plans, journals, todos)
+- `*.md` at repo root limited to README touches that don't reference new API surface
+
+`CHANGELOG.md`, `pyproject.toml`, `**/__init__.py::__version__`, `src/**`, `packages/**/src/**`, `specs/**`, and `.github/workflows/**` are explicitly EXCLUDED from the carve-out — any of these means a release IS required.
+
+```bash
+# DO — verify carve-out before deciding to skip /release
+non_carveout=$(git diff --name-only main...HEAD \
+  | grep -vE '^(tests/|.+/tests/|docs/|workspaces/)' \
+  | grep -v '\.md$' || true)
+if [ -z "$non_carveout" ]; then
+  echo "Carve-out applies — no /release needed."
+else
+  echo "Source/config files changed — /release required:"
+  echo "$non_carveout"
+fi
+
+# DO NOT — assume "feels test-only" and skip release
+gh pr merge 824 --admin --merge && echo "done"   # but PR also touched src/kaizen/foo.py — release was required
+```
+
+**BLOCKED rationalizations:**
+
+- "Mostly test-only with one src/ file touched" — the carve-out requires zero source changes
+- "Test imports a new helper from src/ that I added" — the new helper IS source code; release required
+- "Workspace plus a small spec edit" — `specs/` is consumer-visible; release required
+- "Docs sample updated to reference a new API surface" — release IF the new API ships in this PR
+- "CHANGELOG entry but no source change" — a changelog entry implies a versioned release; cut the release
+- "It's just a fix to a test that was wrong" — still test-only, carve-out applies
+- "I'll batch the test PR with the next code release" — splitting test-only PRs keeps the release scope clean; carve-out is the cleaner path
+- "The PR also bumped uv.lock" — `uv.lock` IS consumer-visible (changes the resolved dependency tree); release required
+
+**Why:** PyPI ships wheels, not git trees — a test-only / docs-only / workspace-only diff produces zero wheel-content change (tests aren't packaged in wheels; `workspaces/` and `docs/` are excluded from `pyproject.toml::include`). Forcing `/release` on a no-op diff burns ~5 minutes of CI per PR for zero consumer benefit; the explicit allowlist + exclusions above is the structural defense against rationalization.
+
+Origin: kailash-kaizen #821 (2026-05-05) — PR #824 (test parity for `kaizen-agents/research_patterns/*`) merged via admin without `/release`; user approved option A because the diff was strictly under the kaizen-agents package (`tests/unit/`). Carve-out codified to prevent re-deriving the same A/B decision next BUILD-repo session.
+
 ### 2. PyPI Installability Is The Done Gate, Not Merge
 
 After `/release` publishes to PyPI, the session MUST verify the new version is installable AND the new surface importable:
@@ -81,6 +123,8 @@ print(AgentDiagnostics, TraceExporter)
 ```
 
 **PyPI cache lag**: `pypi.org/pypi/<pkg>/json` `info.version` field can show the OLD version for up to several minutes after a successful tag-push + publish-workflow-success. Retry the clean-venv install up to 3× with 60s between attempts before declaring release failure. The simple index (`pypi.org/simple/<pkg>/`) can be even slower to reflect the new wheel. If the workflow run shows success and the `.../2.10.1/json` endpoint returns metadata, the release DID happen — trust the verification retry loop.
+
+**`uv` index-cache override**: when `pypi.org/pypi/<pkg>/<ver>/json` returns the new metadata BUT `uv pip install "<pkg>==<ver>"` reports `No solution found ... no version of <pkg>==<ver>`, the gap is `uv`'s local index cache, not PyPI. Pass `--refresh` to force a re-fetch: `uv pip install --refresh "<pkg>==<ver>"`. The pip-direct path (`/tmp/verify/bin/pip install ...`) does not need this flag because pip's index TTL is shorter, but the build-repo-release-discipline standard is `uv` per `python-environment.md` Rule 1, so `--refresh` is the documented unblocker for the install-verification step. If `uv pip install --refresh` STILL reports unresolvable when `pypi.org/pypi/<pkg>/<ver>/json` returns the new metadata, fall back to `python -m ensurepip --upgrade && python -m pip install --no-cache-dir "<pkg>==<ver>"`. pip's index TTL is shorter than uv's deeper index-state cache; one-shot install succeeds where `uv pip install --refresh` does not. Evidence: kailash-dataflow 2.7.5 release verify (2026-05-01).
 
 **Latent failures count**: When the clean-venv check fails, the broken pattern is the scope of the hotfix — NOT just the most-recent PR's diff. The same failure may have been latent in main for many sessions, hidden behind editable installs in every dev environment. "It's been working" / "this PR didn't introduce it" / "main was green" are BLOCKED rationalizations. Fix the entire broken pattern in the hotfix; file a follow-up issue ONLY if the fix exceeds one shard (per `autonomous-execution.md` Rule 1). See `dependencies.md` § "MUST: `__init__.py` Module-Scope Imports Honor The Manifest" for the structural defense that prevents the failure class.
 
@@ -146,7 +190,7 @@ for pkg_dir in packages/*/; do
 done
 
 # DO NOT — defer the check to /release
-# (Wave 4 PR #632 modified packages/kailash-mcp/src/.../auth/{providers,oauth}.py
+# (Wave 4 PR #632 modified the mcp package directory src/.../auth/{providers,oauth}.py
 #  but mcp pyproject stayed at 0.2.9. Caught only at /release-time enumeration,
 #  required a separate fix-PR #634 to bump mcp 0.2.9 → 0.2.10. Net cost:
 #  one extra PR, one extra CI cycle, one extra admin merge, ~15min of pacing.)
@@ -160,9 +204,9 @@ done
 - "We'll catch it at /release time"
 - "The PR title says 'security' so the version bump is implicit"
 
-**Why:** Sub-package src ships as that sub-package's wheel — there is no transitive path that delivers a `kailash-mcp` source change to consumers without a `kailash-mcp` version bump and a new PyPI publish. PR-review-time mechanical check converts an O(/release-time hotfix) cost into an O(grep) check; the alternative ("fold into next wave") is the exact rationalization that produces the silent sibling-drift this rule's § 1 was authored to prevent. Cross-SDK applicable: same Cargo.toml + lib.rs version atomicity in kailash-rs, same release-cycle / sibling-drift pattern.
+**Why:** Sub-package src ships as that sub-package's wheel — there is no transitive path that delivers a sub-package source change to consumers without a sub-package version bump and a new package publish. PR-review-time mechanical check converts an O(/release-time hotfix) cost into an O(grep) check; the alternative ("fold into next wave") is the exact rationalization that produces the silent sibling-drift this rule's § 1 was authored to prevent. The same atomicity applies to Cargo.toml + lib.rs version pairing in compiled-language SDKs.
 
-Origin: Session 2026-04-26 Wave 4 (kailash-py) — PR #632 (kailash-mcp/auth/\* security fix) merged without bumping mcp 0.2.9. Caught at /release-time scope enumeration; required fix-PR #634 (separate CI + admin merge) to bump mcp 0.2.9 → 0.2.10.
+Origin: 2026-04-26 — a sub-package security fix merged without bumping its version; caught at /release-time scope enumeration; required a separate fix-PR (extra CI + admin merge) to bump.
 
 ## MUST NOT
 

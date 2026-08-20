@@ -1,5 +1,10 @@
 ---
-paths: "**/*.py, **/*.ts, **/*.rs"
+priority: 10
+scope: path-scoped
+paths:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.rs"
 ---
 
 # Runtime Patches for Upstream Bugs

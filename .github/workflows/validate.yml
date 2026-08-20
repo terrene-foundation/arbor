@@ -1,0 +1,471 @@
+name: Validate COC Structure
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate structure
+        run: |
+          set -euo pipefail
+          echo "Checking COC structure..."
+
+          # Verify critical directories exist
+          test -d .claude/agents && echo "✓ agents/"
+          test -d .claude/skills && echo "✓ skills/"
+          test -d .claude/rules && echo "✓ rules/"
+          test -d .claude/commands && echo "✓ commands/"
+
+          # Multi-CLI USE template MUST emit one baseline per CLI at root
+          # (claude → CLAUDE.md, codex → AGENTS.md, gemini → GEMINI.md).
+          # Per cross-cli-parity.md MUST Rule 3 (frontmatter priority+scope
+          # are identical across CLIs) the three baselines are the always-on
+          # surface for each CLI; missing one means that CLI's users get a
+          # silently weaker rule surface.
+          test -f CLAUDE.md && echo "✓ CLAUDE.md (claude baseline)"
+          test -f AGENTS.md && echo "✓ AGENTS.md (codex baseline)"
+          test -f GEMINI.md && echo "✓ GEMINI.md (gemini baseline)"
+
+          # Check for contamination: src/kailash/ paths should not leak into
+          # USE template .claude/ content EXCEPT for files on the allowlist.
+          # Allowlist = files that legitimately guide developers working WITH
+          # the kailash-py source tree (provenance, navigation, compliance).
+          #
+          # See .github/coc-sdk-refs-allowlist.txt to add exemptions.
+          # The allowlist is auto-extended by loom's coc-sync agent on every
+          # /sync Gate 2 distribute (see loom/.claude/agents/management/
+          # coc-sync.md § "Step 7.5: Refresh SDK-Refs Allowlist").
+          ALLOWLIST=.github/coc-sdk-refs-allowlist.txt
+          if [ ! -f "$ALLOWLIST" ]; then
+            echo "ERROR: missing $ALLOWLIST"
+            exit 1
+          fi
+
+          # Strip comments/blanks from allowlist, sort for comm
+          grep -vE '^\s*(#|$)' "$ALLOWLIST" | sort > /tmp/allowed.txt
+
+          # Find all .claude/ files containing src/kailash/
+          grep -rl "src/kailash/" .claude/ 2>/dev/null | sort > /tmp/found.txt || true
+
+          # Compute: found \ allowed  (files with contamination not on allowlist)
+          contamination=$(comm -23 /tmp/found.txt /tmp/allowed.txt)
+
+          if [ -n "$contamination" ]; then
+            echo ""
+            echo "ERROR: src/kailash/ references found in files not on allowlist:"
+            echo "$contamination" | sed 's/^/  /'
+            echo ""
+            echo "Fix options:"
+            echo "  1. Remove the src/kailash/ reference (if it's an accidental leak), OR"
+            echo "  2. Add the file path to $ALLOWLIST (if the file legitimately needs to"
+            echo "     reference SDK source — e.g., provenance Origin: lines, compliance"
+            echo "     tracking, or navigation skills that teach SDK layout)"
+            echo ""
+            echo "If this fired during a downstream /sync of a fresh loom release,"
+            echo "the upstream coc-sync allowlist auto-refresh did not run. Re-run"
+            echo "/sync at loom/ — Step 7.5 will append the new entries."
+            exit 1
+          fi
+
+          echo "✓ No contamination detected (allowlist: $(wc -l < /tmp/allowed.txt) entries)"
+
+          # Count agents and skills
+          echo "Agents: $(find .claude/agents -name '*.md' | wc -l)"
+          echo "Skills: $(find .claude/skills -name '*.md' | wc -l)"
+          echo "Rules: $(find .claude/rules -name '*.md' | wc -l)"
+          echo "Commands: $(find .claude/commands -name '*.md' | wc -l)"
+          echo "All checks passed!"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Image-pin MUTUAL-CONSISTENCY gate.
+      #
+      # TWO DIFFERENT INVARIANTS LIVE HERE. The first version of this step
+      # conflated them and was WRONG — it red the 1.22.0 sync PR (#83), which was
+      # a correct, intended state. Read this before changing the check:
+      #
+      #   A. The six pins agree WITH EACH OTHER.  TRUE ALWAYS.  <-- enforced here
+      #      This is the failure the brief actually names: "a release that bumps
+      #      only the other five silently republishes a stale page", because the
+      #      publish workflow pushes DOCKERHUB.md to the registry overview.
+      #
+      #   B. The six equal .claude/VERSION.  TRUE ONLY AT/AFTER RELEASE.
+      #      FALSE BY DESIGN in the sync→release window: loom's Gate-2 sync bumps
+      #      VERSION, and the six are repointed later by a local release commit,
+      #      once the image for that tag actually EXISTS on the registry. You
+      #      cannot point a config at an unpublished image.
+      #      Evidence: 537ab6f (2026-08-02) bumped VERSION to 1.21.0; af3eeff
+      #      (2026-08-04, two days later) bumped exactly these six together —
+      #      "release(dev-image): point consumer configs at the published 1.21.0
+      #      image". That two-day gap is the normal window, not drift.
+      #
+      # B's real enforcement point is TAG TIME — publish-dev-image.yml, which
+      # triggers on `push: tags: v*` and is the moment an image is cut. This
+      # workflow runs only on push/PR to main and never sees a tag, so it cannot
+      # enforce B even in principle. publish-dev-image.yml is loom-synced ("do not
+      # hand-edit the consumer copy"), so wiring B there is an UPSTREAM ask.
+      #
+      # B is therefore reported ADVISORY below — visible, never blocking.
+      #
+      # Matcher is anchored on `kailash-coc-py:<semver>` deliberately. DOCKERHUB.md
+      # carries a bare `1.10.1` in a "Prior stable — retained for provenance" table
+      # cell; that is BY DESIGN and is not in the pinned-tag form, so this check
+      # structurally cannot trip on it. Do not loosen the anchor to bare versions.
+      - name: Image-pin mutual consistency (the six agree with each other)
+        run: |
+          set -uo pipefail
+          # NOT `require("./.claude/VERSION")` — the file is JSON with NO extension,
+          # so require() parses it as JS and throws.
+          VERSION="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(".claude/VERSION","utf8")).version)')"
+          if [ -z "$VERSION" ]; then
+            echo "  could not read .claude/VERSION::version — failing rather than comparing against empty"
+            exit 1
+          fi
+          echo "VERSION::version = $VERSION (advisory reference only — see invariant B above)"
+          FILES=(docker-compose.yml .devcontainer/devcontainer.json bin/dev
+                 README.md Dockerfile.user.example DOCKERHUB.md)
+          rc=0
+          seen=""
+          for f in "${FILES[@]}"; do
+            if [ ! -e "$f" ]; then
+              echo "  MISSING  $f — the brief names it as one of the six"; rc=1; continue
+            fi
+            vals="$(grep -oE 'kailash-coc-py:[0-9]+\.[0-9]+\.[0-9]+' "$f" | sed 's/.*://' | sort -u)"
+            if [ -z "$vals" ]; then
+              echo "  NO PIN   $f — carries no kailash-coc-py:<semver> reference"; rc=1; continue
+            fi
+            n="$(echo "$vals" | wc -l | tr -d ' ')"
+            if [ "$n" -ne 1 ]; then
+              echo "  SPLIT    $f disagrees with ITSELF: $(echo "$vals" | tr '\n' ' ')"; rc=1; continue
+            fi
+            echo "  ok       $f -> $vals"
+            seen="$seen$vals"$'\n'
+          done
+
+          # INVARIANT A — the blocking one.
+          distinct="$(printf '%s' "$seen" | grep -v '^$' | sort -u)"
+          count="$(printf '%s\n' "$distinct" | grep -vc '^$' || true)"
+          if [ "$count" -gt 1 ]; then
+            echo ""
+            echo "  INCONSISTENT — the six do not agree: $(printf '%s' "$distinct" | tr '\n' ' ')"
+            echo "  This is the failure the brief names: bumping only some of them"
+            echo "  republishes a stale Docker Hub overview page. Bump ALL six together."
+            rc=1
+          elif [ "$rc" -eq 0 ]; then
+            echo ""
+            echo "  CONSISTENT — all six at $distinct"
+            # INVARIANT B — advisory ONLY. Never sets rc.
+            if [ "$distinct" != "$VERSION" ]; then
+              echo "  note: pins ($distinct) lag VERSION ($VERSION). EXPECTED between a loom"
+              echo "        sync and the release commit that repoints them once the image for"
+              echo "        $VERSION is published. NOT drift, and deliberately not blocking."
+            fi
+          fi
+          exit "$rc"
+
+      # Cross-reference integrity — EVIDENCE-PRODUCING, NOT A GATE.
+      #
+      # `continue-on-error: true` is deliberate and load-bearing. The validator
+      # exits 1 on ANY dangling ref, and the standing backlog is dominated by
+      # by-design artifact (a USE template legitimately has no journal/ tree, so
+      # every journal-anchored ref reads as dangling). Wiring this as a blocking
+      # gate would red the board permanently on refs that are correct, which is
+      # the fastest way to train readers to ignore CI entirely.
+      #
+      # ONE invocation. Until 2026-08-14 this ran twice, because the validator's
+      # DEFAULT_SCOPE_DIRS excluded .claude/guides and that tree had never been
+      # scanned by any instrument here. loom's guides-scope fix added it, so the
+      # default run now covers guides and a second --scope run would double-count
+      # a subset. Do not re-add one.
+      #
+      # RATCHET: fails ONLY on a count EXCEEDING the pinned baseline — never on
+      # the standing backlog, which is why it can have teeth without reding the
+      # board.
+      #
+      # BASELINE IS A RESIDUAL, NOT A CLEARANCE (completion-criterion.md MUST-6):
+      #   accepted_by:       repo operator, in-session 2026-08-10; re-pinned
+      #                      2026-08-14 for the scope change (see run block)
+      #   revisit_trigger:   loom lands the remaining guides path fixes. Partly
+      #                      FIRED already — guides not-found fell 22 -> 9 in the
+      #                      1.22.0 sync; 9 remain.
+      #   calendar_backstop: 2026-11-10 (90d) — re-derive then even if the
+      #                      trigger never fires again
+      #
+      # Lower the baseline the moment further fixes land. A baseline that is
+      # never lowered is how a ratchet becomes a rubber stamp. But a baseline
+      # moved for a SCOPE change is neither a lowering nor a raise — re-derive
+      # from scratch and say so, as the 2026-08-14 re-pin does.
+      #
+      # NOTE branch protection carries no required_status_checks, so a red here
+      # is a loud signal, not a merge block. That is the intended strength.
+      - name: Cross-reference integrity (ratchet — fails only on regression)
+        run: |
+          set -uo pipefail
+          # RE-BASELINED 2026-08-14 for a SCOPE CHANGE, not an improvement.
+          # loom's guides-scope fix added ".claude/guides" to the validator's
+          # DEFAULT_SCOPE_DIRS, so the default run now ABSORBS the guides tree
+          # and the old two-baseline split (294 default + 48 guides) no longer
+          # measures two disjoint sets — the second run became a SUBSET of the
+          # first. Both old numbers are void; comparing against them is
+          # meaningless in either direction.
+          #
+          # What actually moved, separated from the scope shift:
+          #   default journal-dir-missing 105 -> 131  (+26 = exactly the guides
+          #     tree's own 26, i.e. absorbed, not new rot)
+          #   default not-found           189 -> 186  (-3,  real improvement)
+          #   guides  not-found            22 -> 9    (-13, loom's fixes landing)
+          # The raw +23 on the default scope was the absorption; the underlying
+          # not-found surface IMPROVED.
+          #
+          # Now ONE scope, ONE baseline. Do not re-add a guides sub-run: it
+          # double-counts a subset. Still not a health metric — 131 of 317 are
+          # by-design journal-dir-missing on a USE template.
+          # RE-BASELINED 2026-08-16, 317 -> 319 (+2). The two new refs were NAMED,
+          # not inferred from the count — this step reports a TALLY and not the hits,
+          # so they were obtained by running the validator locally against both trees
+          # and diffing the ref SETS (keyed source+kind+token+reason, so the 10
+          # line-shift moves that also appear in a naive diff are excluded):
+          #
+          #   .claude/rules/deferral-registry-locality.md
+          #       -> `.claude/bin/phase2-deferral-integrity.mjs`   not-found
+          #   .claude/skills/30-claude-code-patterns/deferral-registry-locality.md
+          #       -> `bin/phase2-deferral-integrity.mjs`           not-found
+          #
+          # Both are the SAME cause: a newly-distributed rule (+ its paired skill)
+          # cites the deferral-integrity validator, which is deliberately LOOM-ONLY
+          # (it classifies skip/no_tier_match in loom's sync manifest and ships to no
+          # consumer). So the rule cascades and the binary it names cannot.
+          #
+          # "Fix the new refs" is NOT actionable at this repo: a consumer cannot create
+          # a file loom deliberately withholds. The fix belongs at loom — either scrub
+          # loom-only citations at Gate-2 emission, or teach the validator a consumer
+          # mode that treats loom-only token classes as absent-by-design. Tracked there.
+          # Same class as the 131-of-317 by-design journal-dir-missing noted above.
+          # RE-BASELINED 2026-08-19, 319 -> 61. A SCOPE CHANGE, not an improvement —
+          # re-derived from scratch, exactly as the 2026-08-14 note above requires.
+          #
+          # The loom@0c663306 sync taught validate-xref-integrity.mjs to CLASSIFY what it
+          # used to lump together. `dangling_count` — the field this gate reads — now
+          # EXCLUDES three new buckets it previously counted:
+          #     skipped_deferred            34   (sanctioned deferred-fixture refs)
+          #     skipped_absent_by_design   152   (148 declared shipped-file + 4 in-code)
+          #     not_applicable             144   (journal-tree-absent on a USE template)
+          # so the same tree that read ~319 under the old denominator reads 61 under the new
+          # one. NOTHING WAS FIXED; the question the number answers changed.
+          #
+          # This left the gate DISARMED for one release: 61 against a 319 baseline takes the
+          # "IMPROVED" branch and passes, so it would have absorbed 258 NEW dangling refs in
+          # silence. That is the `instrument-bipolarity.md` MUST-1 "red pole that stops
+          # redding" case — which is why the pole pair below now ships with it.
+          #
+          # Measured at re-baseline: 61 dangling, concentrated in inherited SDK-skill docs
+          # (nexus 10+4, validation-patterns 6, cc-audit 4, kaizen 4+3, mcp 4+4). The four
+          # rules this sync ADDED (burndown-integrity, deferral-registry-locality,
+          # instrument-bipolarity, orchestrator-context-economy) contribute ZERO — verified
+          # from --json `dangling[].source`, not from grepping the human-readable output,
+          # which also matches lines where a rule is the TARGET rather than the source.
+          BASELINE_DEFAULT=61
+          echo "Cross-reference integrity — ratchet against a pinned baseline."
+          echo "NOT a health metric: 131 of the standing total are by-design"
+          echo "(journal-dir-missing on a USE template, which has no journal/ tree)."
+          echo "Baseline: default=$BASELINE_DEFAULT (now INCLUDES .claude/guides)"
+          echo ""
+
+          summarize() {
+            local label="$1"; shift
+            COUNT=UNMEASURED
+            node .claude/bin/validate-xref-integrity.mjs "$@" --json > /tmp/xref.json 2>/tmp/xref.err || true
+            if [ ! -s /tmp/xref.json ]; then
+              echo "  $label: validator produced no JSON — treat as UNMEASURED, not zero"
+              sed 's/^/    /' /tmp/xref.err | head -5
+              return
+            fi
+            COUNT="$(node -e '
+              try {
+                const d = JSON.parse(require("fs").readFileSync("/tmp/xref.json", "utf8"));
+                process.stdout.write(Number.isInteger(d.dangling_count) ? String(d.dangling_count) : "UNMEASURED");
+              } catch (e) { process.stdout.write("UNMEASURED"); }
+            ')"
+            node -e '
+              const fs = require("fs");
+              const label = process.argv[1];
+              let d;
+              try { d = JSON.parse(fs.readFileSync("/tmp/xref.json", "utf8")); }
+              catch (e) { console.log(`  ${label}: unparseable JSON — UNMEASURED`); process.exit(0); }
+              const by = {};
+              for (const x of d.dangling || []) {
+                const r = x.reason || x.kind || "unknown";
+                by[r] = (by[r] || 0) + 1;
+              }
+              const hosts = new Set((d.dangling || []).map(x => x.source || x.host || "?"));
+              console.log(`  ${label}: dangling=${d.dangling_count} across ${hosts.size} host file(s)`);
+              console.log(`    files_scanned=${d.files_scanned} tokens_scanned=${d.tokens_scanned}`);
+              for (const [r, n] of Object.entries(by).sort((a, b) => b[1] - a[1])) {
+                console.log(`    ${r}: ${n}`);
+              }
+            ' "$label"
+          }
+
+          summarize "default scope (commands, rules, skills, agents, guides)"
+          DEFAULT_COUNT="$COUNT"
+
+          echo ""
+          rc=0
+          check() {
+            local label="$1" actual="$2" baseline="$3"
+            if [ "$actual" = "UNMEASURED" ]; then
+              echo "  $label: UNMEASURED — treating as FAILURE, not as zero."
+              echo "    An absent measurement is not a passing measurement."
+              rc=1
+            elif [ "$actual" -gt "$baseline" ]; then
+              echo "  $label: REGRESSION — $actual > baseline $baseline (+$((actual - baseline)))"
+              rc=1
+            elif [ "$actual" -lt "$baseline" ]; then
+              echo "  $label: IMPROVED — $actual < baseline $baseline. Lower the baseline in this file."
+            else
+              echo "  $label: at baseline ($actual)."
+            fi
+          }
+          # POLE PAIR (instrument-bipolarity.md MUST-1 + MUST-2). This gate sat DISARMED
+          # for a release because its baseline outran its denominator, and nothing here
+          # could have told us. Both poles run in the same job, through the SAME check()
+          # the real assertion uses, and the harness asserts the verdicts DIFFER.
+          #
+          # MUST-2: the red pole matches a failure IDENTITY (the literal REGRESSION
+          # message), never merely a non-zero exit — an exit code is a quantity, and
+          # asserting only that survives the obvious repair.
+          pole_rc=0
+          red_out="$(rc=0; check "red pole" "$((BASELINE_DEFAULT + 1))" "$BASELINE_DEFAULT"; echo "rc=$rc")"
+          green_out="$(rc=0; check "green pole" "$BASELINE_DEFAULT" "$BASELINE_DEFAULT"; echo "rc=$rc")"
+
+          case "$red_out" in
+            *REGRESSION*rc=1*) echo "  ✓ red pole: REGRESSION identity raised, rc=1" ;;
+            *) echo "  ✗ red pole DISARMED — expected a REGRESSION verdict with rc=1, got:"
+               printf '%s\n' "$red_out" | sed 's/^/      /'; pole_rc=1 ;;
+          esac
+          case "$green_out" in
+            *"at baseline"*rc=0*) echo "  ✓ green pole: accepted at baseline, rc=0" ;;
+            *) echo "  ✗ green pole rejects a compliant input — the gate would red on healthy trees:"
+               printf '%s\n' "$green_out" | sed 's/^/      /'; pole_rc=1 ;;
+          esac
+          if [ "$red_out" = "$green_out" ]; then
+            echo "  ✗ VACUOUS pair — both poles produced an identical verdict, so this"
+            echo "    comparison cannot discriminate and its green means nothing."
+            pole_rc=1
+          fi
+          if [ "$pole_rc" -ne 0 ]; then
+            echo "Refusing to report a ratchet verdict from an unproven comparison."
+            exit 1
+          fi
+          echo ""
+
+          check "default scope" "$DEFAULT_COUNT" "$BASELINE_DEFAULT"
+
+          if [ "$rc" -ne 0 ]; then
+            echo ""
+            echo "New dangling cross-references, or a measurement that did not run."
+            echo "Fix the new refs — do NOT raise the baseline to make this pass."
+          fi
+          exit "$rc"
+
+      # Undeclared top-level write surfaces — HARD gate.
+      #
+      # Added 2026-08-19 after sync PR #89 wrote 950 files into DOTLESS `codex/`
+      # and `gemini/` trees while the manifest it shipped declares the owned
+      # surfaces as `.codex/**` and `.gemini/**`. 944 were byte-identical
+      # duplicates of files already on main; the other 6 were the cycle's ONLY
+      # real artifact updates (wrapup + rules-reference, both CLIs), so they
+      # landed on a dead path while the live trees received nothing. All three
+      # pre-existing steps scope to `.claude/`, so none could see it.
+      #
+      # HARD gate, not a ratchet: unlike the xref backlog there is no standing
+      # population of undeclared roots to burn down. The correct state is
+      # already empty, so any hit is a regression by construction.
+      #
+      # The allowlist is DERIVED from `.claude/sync-manifest.yaml::owned_surfaces`
+      # (the authority per artifact-flow.md § The Owned-Surface Bound), never
+      # restated — a hand-copied list drifts from the contract it enforces.
+      #
+      # SCOPE, stated so a green is not over-read: this checks top-level
+      # DIRECTORIES only. The defect class is a stray emitted TREE. A stray
+      # top-level FILE is NOT covered here — root files legitimately exist that
+      # owned_surfaces does not enumerate (README.md, DOCKERHUB.md), and the
+      # ones that carry contracts are already gated by the image-pin step above.
+      - name: Undeclared top-level surfaces (hard gate)
+        run: |
+          set -uo pipefail
+
+          # Repo-native roots: target-owned, never written by a loom sync.
+          # Newline-delimited on purpose — an unquoted space-separated string
+          # word-splits under bash but NOT under zsh, so the same script would
+          # behave differently on a runner than in a local pre-flight. That
+          # exact discrepancy was caught pre-push; do not collapse it to spaces.
+          PINNED='scripts
+          tools
+          workspaces'
+
+          ALLOWED="$( { grep -E '^[[:space:]]+- surface:' .claude/sync-manifest.yaml \
+                          | awk '{print $3}' | sed 's#/.*##'
+                        printf '%s\n' "$PINNED" | sed 's/^[[:space:]]*//'
+                      } | sed 's#^\./##' | grep -v '^$' | sort -u )"
+
+          if [ "$(printf '%s\n' "$ALLOWED" | wc -l | tr -d ' ')" -lt 5 ]; then
+            echo "FAIL: derived only $(printf '%s\n' "$ALLOWED" | wc -l | tr -d ' ') allowed roots — the manifest parse broke."
+            echo "Refusing to pass: a truncated allowlist flags healthy roots as"
+            echo "stray, and an empty one cannot discriminate at all."
+            exit 1
+          fi
+          echo "Derived $(printf '%s\n' "$ALLOWED" | wc -l | tr -d ' ') allowed top-level roots (manifest + pinned repo-native)."
+
+          # NEGATIVE CONTROL (verification-gate-integrity.md MUST-1): the gate
+          # must be shown able to go RED here, in this job, on this runner,
+          # before its green is read as evidence. The synthetic stray root is
+          # fed through the SAME comparison the real check uses below.
+          CONTROL="$(printf '%s\ncodex\n' "$ALLOWED" | sort -u \
+                      | comm -23 - <(printf '%s\n' "$ALLOWED"))"
+          if [ "$CONTROL" != "codex" ]; then
+            echo "FAIL: negative control did not fire — the comparison cannot"
+            echo "detect a stray root, so a green from it would mean nothing."
+            echo "  expected 'codex', got: '${CONTROL}'"
+            exit 1
+          fi
+          echo "✓ negative control fired (synthetic 'codex' root detected)"
+
+          # Positive control: a root known to be legitimate must NOT be flagged,
+          # or the gate is simply flagging everything and its RED means nothing.
+          if printf '%s\n' ".claude" | comm -23 - <(printf '%s\n' "$ALLOWED") | grep -q .; then
+            echo "FAIL: positive control fired — '.claude' read as stray."
+            exit 1
+          fi
+          echo "✓ positive control clean ('.claude' not flagged)"
+          echo ""
+
+          ACTUAL="$(git ls-tree -d --name-only HEAD | sed 's#/$##' | sort -u)"
+          STRAY="$(printf '%s\n' "$ACTUAL" | comm -23 - <(printf '%s\n' "$ALLOWED"))"
+
+          if [ -n "$STRAY" ]; then
+            echo "FAIL: undeclared top-level director(ies) present:"
+            printf '%s\n' "$STRAY" | sed 's/^/  /'
+            echo ""
+            echo "Every top-level tree must be declared in"
+            echo "  .claude/sync-manifest.yaml::owned_surfaces"
+            echo "or be a pinned repo-native root (scripts, tools, workspaces)."
+            echo ""
+            echo "A DOTLESS twin of a declared surface (codex/ vs .codex/) is the"
+            echo "known loom Gate-2 emission defect: strip the stray tree and"
+            echo "relocate any genuinely-new files onto the declared dotted path."
+            exit 1
+          fi
+
+          echo "✓ no undeclared top-level directories"
