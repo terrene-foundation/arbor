@@ -12,10 +12,15 @@ When multiple agents modify the same file in parallel worktrees, use this workfl
 
 ### 1. Identify unique variants
 
-Each worktree branches from the committed HEAD and applies ONE feature. Filter worktrees by feature marker:
+Each worktree branches from the committed HEAD and applies ONE feature. Filter worktrees by feature marker.
+
+Worktrees live in the SIBLING base outside the repo, never `.claude/worktrees/` (`rules/worktree-isolation.md` Rule 7); derive the base location-independently rather than hardcoding it:
 
 ```bash
-for wt in .claude/worktrees/agent-*/; do
+main_top=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+WT_BASE="$(dirname "$main_top")/.$(basename "$main_top")-wt"
+
+for wt in "$WT_BASE"/agent-*/; do
     f="${wt}src/kailash/trust/pact/engine.py"
     [ -f "$f" ] || continue
     n1=$(grep -c "KnowledgeFilter" "$f")
@@ -32,7 +37,7 @@ Each diff isolates one feature's additions without entanglement:
 
 ```bash
 git show HEAD:src/kailash/trust/pact/engine.py > /tmp/engine_head.py
-diff -u /tmp/engine_head.py .claude/worktrees/agent-XXX/src/kailash/trust/pact/engine.py > /tmp/n1.patch
+diff -u /tmp/engine_head.py "$WT_BASE"/agent-XXX/src/kailash/trust/pact/engine.py > /tmp/n1.patch
 ```
 
 ### 3. Delegate the merge to a specialist
@@ -69,8 +74,8 @@ Before merging a worktree branch, check if its merge-base is older than the targ
 
 ```bash
 # For each worktree about to merge, compare LOC of shared files
-TARGET_FILE="packages/kailash-kaizen/src/kaizen/core/base_agent.py"
-for wt in .claude/worktrees/agent-*/; do
+TARGET_FILE="the kaizen package directory src/kaizen/core/base_agent.py"
+for wt in "$WT_BASE"/agent-*/; do
     wt_file="${wt}${TARGET_FILE}"
     [ -f "$wt_file" ] || continue
     main_loc=$(wc -l < "$TARGET_FILE")
@@ -132,4 +137,4 @@ uv run pytest tests/invariants/ -x --tb=short -q
 
 2026-04-10 session: 5 PACT conformance features (N1 KnowledgeFilter, N2 EnvelopeCache, N3 PlanSuspension, N4 AuditTiers, N5 ObservationSink) merged from 5 independent worktrees into `engine.py` (2329 → 3211 lines). All 1192 PACT tests passed on first merged run after specialist applied the changes with explicit injection-point documentation.
 
-**Post-mortem addendum (2026-04-11):** This skill was created in the same session that produced a silent regression on `base_agent.py`. A worktree merge re-inlined 1,079 LOC of extracted MCPMixin methods because: (a) the worktree was based on a stale pre-slimming HEAD, (b) no LOC invariant test existed, and (c) this skill did not include stale-base detection. Steps 6-8 were added to prevent recurrence. See `journal/0003-RISK-spec04-silent-regression-via-parallel-merge.md`.
+**Post-mortem addendum (2026-04-11):** This skill was created in the same session that produced a silent regression on `base_agent.py`. A worktree merge re-inlined 1,079 LOC of extracted MCPMixin methods because: (a) the worktree was based on a stale pre-slimming HEAD, (b) no LOC invariant test existed, and (c) this skill did not include stale-base detection. Steps 6-8 were added to prevent recurrence.

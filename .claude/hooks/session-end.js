@@ -18,6 +18,15 @@ const {
   logObservation: logLearningObservation,
   countObservations,
 } = require("./lib/learning-utils");
+const { classifyCommitForJournal } = require("./lib/journal-classifier");
+// loom#1349 — the ONE hardened append primitive; see lib/append-sink.js for the six defenses.
+const { appendSinkLine } = require("./lib/append-sink.js");
+// The single guarded-read chokepoint for tracked/shared session-notes paths
+// (R9 MED-1): lstat-refuses symlink/non-regular + size-caps BEFORE reading, so a
+// teammate-plantable `.session-notes` (-> /dev/zero, or oversized) cannot hang/OOM
+// this SessionEnd hook. Returns { ok, content, stat } — stat carries mtime for the
+// age gate without a second (un-guarded) statSync.
+const { readNotesFileGuarded } = require("./lib/session-notes-layout.js");
 
 // Timeout fallback — prevents hanging the Claude Code session
 const TIMEOUT_MS = 15000;
@@ -32,12 +41,16 @@ process.stdin.on("data", (chunk) => (input += chunk));
 process.stdin.on("end", () => {
   try {
     const data = JSON.parse(input);
-    saveSession(data);
-    // SessionEnd hooks don't support hookSpecificOutput in schema
+    const summary = saveSession(data);
+    // SessionEnd schema: no hookSpecificOutput. Surface a stderr summary so
+    // the user sees what was checkpointed (was DARK pre-fix).
+    if (summary) {
+      process.stderr.write(`[session-end] ${summary}\n`);
+    }
     console.log(JSON.stringify({ continue: true }));
     process.exit(0);
   } catch (error) {
-    console.error(`[HOOK ERROR] ${error.message}`);
+    process.stderr.write(`[session-end] HOOK ERROR: ${error.message}\n`);
     console.log(JSON.stringify({ continue: true }));
     process.exit(1);
   }
@@ -106,16 +119,28 @@ function saveSession(data) {
     } catch {}
 
     // --- Build learning digest (replaces instinct pipeline) ---
-    try {
-      buildLearningDigest(cwd, learningDir);
-    } catch {}
+    // buildLearningDigest never throws; it returns its own verdict, which the
+    // summary below reports verbatim rather than assuming success.
+    const digestVerdict = buildLearningDigest(cwd, learningDir);
 
     // Clean up old sessions (keep last 20)
     cleanupOldSessions(sessionDir, 20);
 
-    return { saved: true, path: sessionFile };
+    // User-visible summary (was DARK before; mitigates red-team session-end-DARK)
+    const stats = sessionData.stats || {};
+    const fileCount = Object.values(stats).reduce(
+      (a, b) => a + (typeof b === "number" ? b : 0),
+      0,
+    );
+    const digestNote =
+      digestVerdict === "built"
+        ? "learning digest built"
+        : digestVerdict === "skipped-below-threshold"
+          ? "learning digest skipped (below observation threshold)"
+          : "learning digest unavailable";
+    return `checkpoint saved (session=${session_id.slice(0, 8)}, ~${fileCount} touched, ${digestNote})`;
   } catch (error) {
-    return { saved: false, error: error.message };
+    return `checkpoint FAILED: ${error.message}`;
   }
 }
 
@@ -203,20 +228,24 @@ function logSessionAccomplishments(cwd, sessionId) {
   // Direct .session-notes file
   const notesPath = candidates[0];
   if (fs.existsSync(notesPath)) {
-    const stat = fs.statSync(notesPath);
-    const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
-    // Only log if modified recently (within last 4 hours = likely this session)
-    if (ageHours > 4) return;
-
-    const content = fs.readFileSync(notesPath, "utf8");
-    const accomplishments = extractAccomplishments(content);
-    if (accomplishments) {
-      logLearningObservation(
-        cwd,
-        "session_accomplishment",
-        { accomplishments: accomplishments.substring(0, 1000) },
-        { session_id: sessionId },
-      );
+    // Guarded read (R9 MED-1): a symlink/oversize root .session-notes is skipped,
+    // never read into a hang. Root notes present → handle here, do not also scan
+    // workspaces (preserves the original control flow).
+    const g = readNotesFileGuarded(notesPath);
+    if (g.ok) {
+      const ageHours = (Date.now() - g.stat.mtimeMs) / (1000 * 60 * 60);
+      // Only log if modified recently (within last 4 hours = likely this session)
+      if (ageHours <= 4) {
+        const accomplishments = extractAccomplishments(g.content);
+        if (accomplishments) {
+          logLearningObservation(
+            cwd,
+            "session_accomplishment",
+            { accomplishments: accomplishments.substring(0, 1000) },
+            { session_id: sessionId },
+          );
+        }
+      }
     }
     return;
   }
@@ -229,13 +258,15 @@ function logSessionAccomplishments(cwd, sessionId) {
     const workspaces = fs.readdirSync(wsDir);
     for (const ws of workspaces) {
       const wsNotes = path.join(wsDir, ws, ".session-notes");
-      if (!fs.existsSync(wsNotes)) continue;
-
-      const stat = fs.statSync(wsNotes);
-      const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+      // Guarded read (R9 MED-1): workspaces/<ws>/.session-notes is a live
+      // committed multi-operator surface with a genuine teammate-symlink vector;
+      // absent/symlink/oversize → skip this workspace, never hang.
+      const g = readNotesFileGuarded(wsNotes);
+      if (!g.ok) continue;
+      const ageHours = (Date.now() - g.stat.mtimeMs) / (1000 * 60 * 60);
       if (ageHours > 4) continue;
 
-      const content = fs.readFileSync(wsNotes, "utf8");
+      const content = g.content;
       const accomplishments = extractAccomplishments(content);
       if (accomplishments) {
         logLearningObservation(
@@ -293,15 +324,23 @@ function logDecisionReferences(cwd, sessionId, sessionDir) {
       // Only log entries created/modified during this session
       if (stat.mtimeMs < sessionStartMs) continue;
 
-      // Parse type from filename: NNNN-TYPE-topic.md
-      const match = entry.match(/^\d+-(\w+)-(.+)\.md$/);
+      // Parse TYPE from filename. Handles BOTH the legacy single-operator
+      // shape (NNNN-TYPE-topic.md) AND the multi-operator shape
+      // (NNNN-<display_id>-TYPE-topic.md per knowledge-convergence.md MUST-2 /
+      // rules/journal.md). The optional lowercase display_id segment is skipped
+      // so TYPE (uppercase, may contain a hyphen e.g. TRADE-OFF) is captured,
+      // not the display_id. Pre-multi-op regex `^\d+-(\w+)-` mis-captured the
+      // display_id as the type for every NNNN-<display_id>-TYPE entry.
+      const match = entry.match(
+        /^\d+-(?:[a-z0-9_-]+-)?(DECISION|DISCOVERY|TRADE-OFF|RISK|CONNECTION|GAP|AMENDMENT)-(.+)\.md$/,
+      );
       if (!match) continue;
 
       logLearningObservation(
         cwd,
         "decision_reference",
         {
-          type: match[1], // DECISION, DISCOVERY, TRADE-OFF, etc.
+          type: match[1], // DECISION, DISCOVERY, TRADE-OFF, RISK, CONNECTION, GAP, AMENDMENT
           topic: match[2].replace(/-/g, " "),
           file: entry,
         },
@@ -316,14 +355,34 @@ function logDecisionReferences(cwd, sessionId, sessionDir) {
  * Produces learning-digest.json — a structured summary consumed by /codify.
  * Pure file I/O, no LLM calls. Semantic analysis happens in /codify.
  */
+// Returns one of: "built" | "skipped-below-threshold" | "unavailable".
+// NEVER throws, and NEVER reports "built" for work it did not do — the caller
+// puts this verdict in the user-visible summary, so a bare `catch {}` here
+// silently converts a total failure into a success claim (the exact shape
+// `zero-tolerance.md` Rule 3 blocks).
 function buildLearningDigest(cwd, learningDir) {
   const observationCount = countObservations(learningDir);
-  if (observationCount < 5) return;
+  if (observationCount < 5) return "skipped-below-threshold";
 
   try {
-    const digestBuilder = require("../learning/digest-builder");
+    // Repo-root `scripts/`, NOT `.claude/learning/` — the prior specifier
+    // ("../learning/digest-builder") named a directory that exists nowhere in
+    // the corpus, so this require threw MODULE_NOT_FOUND on EVERY invocation.
+    const digestBuilder = require("../../scripts/learning/digest-builder");
     digestBuilder.buildDigest(cwd, learningDir);
-  } catch {}
+    return "built";
+  } catch (error) {
+    // Expected on any CONSUMER: repo-root `scripts/` is outside
+    // `sync-tier-aware.mjs::walkClaudeDir()`, so the builder is never
+    // distributed. Degrade honestly rather than swallowing — the caller
+    // reports "digest unavailable", not "digest built".
+    if (process.env.COC_HOOK_DEBUG) {
+      console.error(
+        `[session-end] learning digest unavailable: ${error && error.message}`,
+      );
+    }
+    return "unavailable";
+  }
 }
 
 /**
@@ -340,28 +399,62 @@ function buildLearningDigest(cwd, learningDir) {
  */
 function generateJournalCandidates(cwd, sessionId, sessionDir) {
   const { detectActiveWorkspace } = require("./lib/workspace-utils");
-  const { execSync } = require("child_process");
+  const { execFileSync } = require("child_process");
+  const { resolveGitBinary, gitEnv } = require("./lib/git-subprocess-env.js");
 
   const workspace = detectActiveWorkspace(cwd);
   if (!workspace) return;
 
-  // Determine session start time for git log --since filter
+  // Determine session start time for git log --since filter.
+  //
+  // PARSED, not passed through (loom#1471). `startedAt` used to be assigned
+  // verbatim and then interpolated into a SHELL command string, inside double
+  // quotes, unescaped — so a session JSON carrying
+  // `x"; <command>; echo "` executed <command>. The file is
+  // ~/.claude/sessions/<id>.json, which is the same delivery surface #1429 and
+  // #1309 already treat as in-model: an agent able to Write settings.local.json
+  // is equally able to Write this. Measured: the payload ran even though git
+  // itself then errored, so git's exit status was never a barrier.
+  //
+  // The two sibling readers of this exact field (`:200`, `:308`) both went
+  // through `new Date(...)`; this one did not, which is the whole defect. The
+  // value is now accepted only if it parses to a real instant, and is
+  // re-serialised from the parsed Date so what reaches git is git's own format
+  // rather than attacker-chosen bytes.
   let sessionStartIso = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
   try {
     const sessionFile = path.join(sessionDir, `${sessionId}.json`);
     if (fs.existsSync(sessionFile)) {
       const data = JSON.parse(fs.readFileSync(sessionFile, "utf8"));
-      if (data.startedAt) sessionStartIso = data.startedAt;
+      if (typeof data.startedAt === "string") {
+        const ms = new Date(data.startedAt).getTime();
+        if (Number.isFinite(ms)) sessionStartIso = new Date(ms).toISOString();
+      }
     }
   } catch {}
 
   // Fetch all session commits in one call. Use %x1f (unit sep) between fields
   // and %x1e (record sep) between commits so multi-line bodies parse safely.
+  //
+  // ARG ARRAY + fenced env, no shell: `--since=` is one argv element, so even a
+  // value that survived the parse above cannot become syntax. The absolute
+  // binary + constants-built env is the ordinary #1462/#1471 half.
   let rawLog;
   try {
-    rawLog = execSync(
-      `git log --since="${sessionStartIso}" --format="%H%x1f%s%x1f%b%x1e" -n 30 2>/dev/null`,
-      { cwd, encoding: "utf8", timeout: 3000 },
+    const gitBin = resolveGitBinary();
+    if (!gitBin) return; // git unresolvable — no candidates, same as no commits
+    rawLog = execFileSync(
+      gitBin,
+      [
+        "log",
+        `--since=${sessionStartIso}`,
+        "--format=%H%x1f%s%x1f%b%x1e",
+        "-n",
+        "30",
+      ],
+      // stderr discarded here rather than by a `2>/dev/null` the shell used to
+      // interpret — there is no shell now.
+      { cwd, encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"], env: gitEnv() },
     );
   } catch {
     return; // not a git repo, git failed, or no commits
@@ -378,6 +471,13 @@ function generateJournalCandidates(cwd, sessionId, sessionDir) {
   const commits = rawLog.split("\x1e").filter((c) => c.trim());
   let count = 0;
 
+  // De-dupe against commits already captured as pending stubs in ANY workspace.
+  // Overlapping `--since` windows (esp. the now-4h fallback) otherwise re-capture
+  // the same SHA every session, inflating the /codify pending backlog. See
+  // lib/pending-dedup.js for the full failure-mode note.
+  const { collectExistingPendingShas } = require("./lib/pending-dedup");
+  const alreadyCaptured = collectExistingPendingShas(cwd);
+
   for (const commit of commits) {
     const parts = commit.trim().split("\x1f");
     const hash = parts[0];
@@ -385,8 +485,22 @@ function generateJournalCandidates(cwd, sessionId, sessionDir) {
     const body = parts[2];
     if (!hash || !subject) continue;
 
-    const type = classifyCommitForJournal(subject, body || "");
-    if (!type) continue;
+    // Already captured (this workspace or another) — skip, log for audit parity
+    // with the classifier-skip path so a future audit sees why nothing was written.
+    if (alreadyCaptured.has(hash)) {
+      appendJournalSkipLog(workspace.path, hash, "already-captured", subject);
+      continue;
+    }
+
+    const verdict = classifyCommitForJournal(subject, body || "");
+    if (!verdict.type) {
+      // Per issue #114 acceptance criteria: log skipped commits to a
+      // per-workspace .journal-skipped.log so a future audit can verify
+      // nothing valuable was filtered. Single-line, grep-able shape.
+      appendJournalSkipLog(workspace.path, hash, verdict.skipReason, subject);
+      continue;
+    }
+    const type = verdict.type;
 
     const filename = `${Date.now()}-${count}-${type}.md`;
     const filepath = path.join(pendingDir, filename);
@@ -420,38 +534,35 @@ ${bodySection}
 
     try {
       fs.writeFileSync(filepath, stub);
+      alreadyCaptured.add(hash); // keep the set authoritative for the rest of the loop
       count++;
     } catch {}
   }
 }
 
 /**
- * Classify a commit by literal pattern matching (no semantic analysis).
- * Returns DECISION | DISCOVERY | RISK | null (skip).
+ * Append one line to the workspace's .journal-skipped.log.
+ *
+ * Format (per issue #114 acceptance criteria):
+ *   <journal-skip>commit=SHA12 reason=SLUG subject="SUBJECT"</journal-skip>\n
+ *
+ * Best-effort write — never throws. The log is gitignored
+ * (workspaces/* is gitignored at the repo root).
  */
-function classifyCommitForJournal(subject, body) {
-  const text = (subject + " " + (body || "")).toLowerCase();
-  // RISK: security/stability concerns mentioned in message
-  if (/\b(risk|concern|vulnerability|cve|security|exploit)\b/.test(text))
-    return "RISK";
-  // DISCOVERY: fixes for subtle bugs often reveal hidden behavior
-  if (
-    /^fix.*(race|leak|deadlock|corrupt|lost|regression)/.test(
-      subject.toLowerCase(),
-    )
-  )
-    return "DISCOVERY";
-  // DECISION: new features imply scope/architecture choices
-  if (/^feat(\(|:)/i.test(subject)) return "DECISION";
-  // DECISION: explicit decision language
-  if (/\b(decided|chose|trade-?off|alternative|rationale)\b/.test(text))
-    return "DECISION";
-  // DISCOVERY: explicit discovery language
-  if (/\b(discovered|found that|turns out|learned)\b/.test(text))
-    return "DISCOVERY";
-  // DECISION: commits touching architecture/decisions docs
-  if (/docs\/(adr|architecture|decisions)/.test(text)) return "DECISION";
-  return null; // routine commit — skip
+function appendJournalSkipLog(workspacePath, hash, skipReason, subject) {
+  try {
+    const logPath = path.join(workspacePath, ".journal-skipped.log");
+    const ts = new Date().toISOString();
+    const safeSubject = String(subject || "")
+      .replace(/[\r\n]/g, " ")
+      .slice(0, 200);
+    // loom#1349 R1 F3 — routed through the shared hardened primitive. Not JSONL, but the same
+    // sink class: an append into a predictable path under a workspace directory, previously
+    // following a planted symlink and creating world-readable. `workspacePath` is the
+    // containment boundary here (the log lives directly inside it).
+    const line = `${ts} <journal-skip>commit=${hash.slice(0, 12)} reason=${skipReason} subject="${safeSubject}"</journal-skip>`;
+    appendSinkLine({ repoDir: workspacePath, sinkPath: logPath, line });
+  } catch {}
 }
 
 function cleanupOldSessions(sessionDir, keepCount) {

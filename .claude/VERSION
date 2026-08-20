@@ -1,13 +1,13 @@
 {
   "version": "3.5.29",
   "type": "coc-project",
-  "description": "COC downstream project for Python SDK projects",
-  "updated": "2026-04-29",
+  "description": "COC downstream project for Python SDK projects (multi-CLI: claude+codex+gemini)",
+  "updated": "2026-08-20",
   "upstream": {
-    "template": "kailash-coc-claude-py",
-    "template_repo": "terrene-foundation/kailash-coc-claude-py",
-    "template_version": "3.5.29",
-    "synced_at": "2026-04-29T00:00:00Z",
+    "template": "kailash-coc-py",
+    "template_repo": "terrene-foundation/kailash-coc-py",
+    "template_version": "1.23.0",
+    "synced_at": "2026-08-20T05:02:59.806Z",
     "sdk_packages": {
       "kailash": "2.12.0",
       "kailash-dataflow": "2.4.0",

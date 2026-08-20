@@ -72,7 +72,7 @@ uv pip install \
   -e packages/kailash-kaizen
 
 # DO NOT — PYTHONPATH prefix workaround
-PYTHONPATH=packages/kailash-dataflow/src:packages/kailash-nexus/src \
+PYTHONPATH=the dataflow package directory src:the nexus package directory src \
   .venv/bin/python -m pytest tests/
 ```
 
@@ -110,13 +110,13 @@ dependencies = [
 
 **Why (extended):** A PyPI version pin on a sub-package the developer is editing forces `uv sync` to download a stale tarball from PyPI, masking the editable changes. This is recurring monorepo bootstrap pain that wastes debugging time every session.
 
-Origin: `workspaces/arbor-upstream-fixes/.session-notes` (2026-04-12)
+Origin: a BUILD-repo upstream-fixes session (2026-04-12).
 
 ## MUST Rule 4 — Hypothesis Memory Error Post-Mortem
 
 ```toml
 # DO — sub-packages own their test deps
-# packages/kailash-pact/pyproject.toml:
+# the pact package directory pyproject.toml:
 [project.optional-dependencies]
 test = ["hypothesis>=6.98"]
 
@@ -163,4 +163,4 @@ Origin: PR #430 CI failure (2026-04-12), commit a9fd4e56 — hypothesis was adde
 
 **Why:** System Python packages leak into project imports, masking missing dependencies that will crash in CI or on another developer's machine.
 
-Origin: `workspaces/arbor-upstream-fixes/.session-notes` § "Traps / gotchas" (2026-04-11) — pyenv shim resolved `python3` to a different interpreter containing Rust bindings for a package also in source; tests "passed" against the wrong code.
+Origin: a BUILD-repo upstream-fixes session § "Traps / gotchas" (2026-04-11) — pyenv shim resolved `python3` to a different interpreter containing Rust bindings for a package also in source; tests "passed" against the wrong code.

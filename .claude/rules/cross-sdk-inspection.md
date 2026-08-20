@@ -30,7 +30,7 @@ When an issue is found or fixed in ONE BUILD repo, you MUST inspect the OTHER BU
 
 - Does the Rust SDK have the same bug?
 - Does the Rust SDK need the equivalent feature?
-- File a GitHub issue on `esperie/kailash-rs` if relevant.
+- File a GitHub issue on `<org>/kailash-rs` if relevant.
 
 ### 2. Cross-Reference in Issues
 
@@ -117,7 +117,7 @@ When closing any issue, verify:
 gh issue create --repo terrene-foundation/kailash-py \
   --title "feat(kaizen): per-request API key override" \
   --label "cross-sdk" \
-  --body "Cross-SDK alignment with esperie/kailash-rs#52"
+  --body "Cross-SDK alignment with <org>/kailash-rs#52"
 ```
 
 ## Automation

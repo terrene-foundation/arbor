@@ -55,11 +55,11 @@ url = f"postgresql://{user}:{pwd}@{host}/{db}"  # drifts from decode path silent
 
 **Why (extended):** Encode and decode are dual halves of one contract; splitting them across modules guarantees one half drifts. Round-trip tests are only meaningful when both ends share the helper.
 
-Origin: `workspaces/arbor-upstream-fixes/.session-notes` (2026-04-12)
+Origin: a BUILD-repo upstream-fixes session (2026-04-12).
 
 ## Sanitizer Contract — Exhaustive Examples
 
-DataFlow's input sanitizer (`packages/kailash-dataflow/src/dataflow/core/nodes.py::sanitize_sql_input`) is a defense-in-depth display-path safety net, NOT the primary SQLi defense. Parameter binding (`$N` / `%s` / `?`) is the primary defense.
+DataFlow's input sanitizer (the dataflow package (`src/dataflow/core/nodes.py::sanitize_sql_input`)) is a defense-in-depth display-path safety net, NOT the primary SQLi defense. Parameter binding (`$N` / `%s` / `?`) is the primary defense.
 
 ### 1. String Inputs Token-Replaced, Not Quote-Escaped
 
@@ -117,8 +117,8 @@ When a security-relevant kwarg (classification policy, tenant scope, clearance c
 # Helper added `policy` + `model_name` kwargs for classification sanitisation.
 #
 # $ grep -rn 'validate_model(' src/ packages/
-# packages/kailash-dataflow/src/dataflow/features/express.py:_validate_if_enabled
-# packages/kailash-dataflow/src/dataflow/engine.py::validate_record
+# the dataflow package directory src/dataflow/features/express.py:_validate_if_enabled
+# the dataflow package directory src/dataflow/engine.py::validate_record
 # tests/...  (tests covered separately)
 #
 # Both production call sites get policy+model_name in this PR:
@@ -146,8 +146,146 @@ engine.validate_record(instance)  -> validate_model(instance)   # bypasses sanit
 
 Origin: PR #522 / PR #529 (2026-04-19) — BP-049 validation sanitiser plumbing missed one sibling.
 
+## Enforcement-Surface Parity — Shared-Rank-Function Pattern + Detection
+
+The eval-helper call-site grep (Multi-Site Kwarg Plumbing above) is structurally insufficient here: the registration / monotonic-tightening validator is a SEPARATE function with no shared callee, so a grep that follows one helper's call sites CANNOT reach it. The two surfaces MUST consume a SINGLE shared restrictiveness/ordering function so they cannot drift; a hand-synced second copy is a MED-severity finding that MUST carry a pinned parity test asserting byte-identical parse + ordering against the eval gate.
+
+```python
+# DO — one shared rank function; the registration validator consumes it, same PR
+def _restrictiveness(v):              # the SINGLE ordering: None=widest, unrecognized=tightest
+    if v is None: return -1
+    try: return LEVELS.index(parse(v))
+    except Exception: return len(LEVELS)           # ANY parse failure -> tightest (fail-closed)
+def _check_clearance(caller, required): ...                    # eval gate (parse -> fail-closed)
+def _validate_monotonic_tightening(old, new):                  # registration gate — SAME PR
+    if _restrictiveness(new) < _restrictiveness(old):
+        raise GovernanceError(...)                             # may only KEEP or RAISE the bar
+
+# DO NOT — promote the gate at eval, leave the tightening validator blind
+def _check_clearance(caller, required): ...                    # new fail-closed gate
+def _validate_monotonic_tightening(old, new):
+    ...   # never learned the new dimension -> a re-registration that DROPS (secret->None)
+          # or LOWERS (secret->public) the bar is accepted as "tightening" -> gate silently stripped
+```
+
+**BLOCKED rationalizations:** "The eval gate is the enforcement point; the validator is secondary" / "grep of the eval helper's call sites found nothing" / "the validator has a safe default" / "the new dimension is rare; re-registration won't hit it" / "the eval check already fails closed, so the bypass is theoretical".
+
+**Detection:** for any field promoted to a fail-closed authorization control at an eval surface, FIRST enumerate ALL validators that reference the control's field/type (the helper-following grep is precisely what cannot find the independent surfaces), THEN grep each re-registration / monotonic-tightening validator for that field name — absence is a finding.
+
+Origin: kailash-py #1456 → kailash-pact 0.14.3 (PR #1459). #1456 promoted `McpToolPolicy.clearance_required` to a fail-closed gate at `_check_clearance` (eval, Step 3.5) but left `_validate_monotonic_tightening` (re-registration) blind to it; a `secret`→None / `secret`→`public` re-registration was accepted as "tightening", silently stripping the gate. Cross-SDK sibling: the Rust SDK binding (same shape).
+
+## Redactor Contract — Extended
+
+### 1. Minimum Subject-Id Length Floor (≥8 chars)
+
+A substring-match redactor that scrubs every string containing a `subject_id` substring MUST reject ids shorter than 8 chars with a typed error citing the floor and the received length. Empty-id rejection alone is insufficient — single-char and 2-char ids substring-match catastrophically into benign role-knowledge strings.
+
+```text
+# DO — fail closed on a too-short id (typed error names floor + received length)
+redact_subject_keyed(payload, subject_id="a")
+→ Error: subject_id length 1 below MIN_SUBJECT_ID_CHARS=8 (over-redaction guard)
+
+# DO NOT — empty-check only; 1–7-char ids over-redact benign strings
+redact_subject_keyed(payload, subject_id="alice")
+→ "malice aforethought" → "m[REDACTED] aforethought"   # role knowledge destroyed
+```
+
+Practical subject refs (sovereign_ref, role_id, agent_id, UUIDs, emails) are all ≥8 chars — the floor is the structural defense against the over-redaction class, which defeats the "successor inherits role knowledge" contract by scrubbing content the successor is entitled to.
+
+### 2. Numbered-Sentinel Key Scrub (companion clause)
+
+A subject-keyed redactor scrubbing object KEYS that match the subject id MUST scrub BOTH the key AND the value. Preserving the original matching key under a `"[REDACTED]"` value leaks the departed subject's identity as audit metadata — a downstream reader can enumerate which entries belonged to them.
+
+```text
+# DO — numbered sentinel preserves audit shape, scrubs identity
+{"alice@example.com": "...", "bob@example.com": "..."} (subject = alice@example.com)
+→ {"[REDACTED_KEY_1]": "[REDACTED]", "bob@example.com": "..."}
+# count of scrubbed keys preserved via per-key counter; byte-level audit trail
+# preserved via the original_hash return (hash-preserving redaction contract)
+
+# DO NOT — preserve the matching key as "audit metadata"
+→ {"alice@example.com": "[REDACTED]", ...}   # identity leaks as the key itself
+```
+
+The matching-key counter prevents map collapse across multiple matching keys; any residue predicate (`payload_mentions_subject`) MUST treat matching keys as residue, symmetric with the scrubber.
+
+**Cross-SDK landing requirement:** when an equivalent subject-keyed redactor lands in a sibling SDK (Python, Ruby, Node), the min-length floor AND the numbered-sentinel key scrub MUST be part of the ORIGINAL landing — not a follow-up.
+
+**Evidence:** the Rust SDK `eatp::redact_subject_keyed` shipped with only an empty-id check (PR #1123 commit `f2cd020e`); /redteam Round 1 flagged HIGH (1–7-char ids over-redact role knowledge) + MEDIUM (preserved matching key leaks predecessor identity). Same-shard fix (commit `6a332ef5`) added the `MIN_SUBJECT_ID_CHARS = 8` floor + regression test `redact_subject_keyed_short_subject_id_is_rejected` + the `[REDACTED_KEY_N]` sentinel + symmetric residue predicate.
+
 ## Kailash-Specific Security — Extended
 
 - **DataFlow**: Access controls on models, validate at model level, never expose internal IDs
 - **Nexus**: Authentication on protected routes, rate limiting, CORS configured
 - **Kaizen**: Prompt injection protection, sensitive data filtering, output validation
+
+## Structural surface enumeration — why the sweep is the backstop, not the control
+
+Depth for `rules/security.md` § Enforcement-Surface Parity, reached via that
+file's header pointer ("Depth for most sections below lives in
+`.claude/guides/rule-extracts/security.md`").
+
+NOTE ON PLACEMENT (loom#1422 AC-5, loom#1355). AC-5 asked § Enforcement-Surface
+Parity to cross-reference the predicate IN THE RULE, so the clause points at
+something structural rather than at human memory. That pointer is NOT in the rule
+body, and the omission is deliberate and measured rather than an oversight: the
+`rs` lane composes `security.md` to 9545B against a granted per-rule ceiling of
+9600B (itself an exception under #1355, expiring 2026-10-31), leaving 55B. The
+shortest honest form of the clause measured ~199B, which BLOCKS the lane. Raising
+the ceiling is a co-owner decision, and displacing existing contract prose to make
+room would trade a live security contract for a cross-reference. So the depth
+lives here, reachable from the rule's existing header pointer, at zero baseline
+emission cost. If the rs per-rule ceiling is ever raised, the one-line pointer
+belongs back in § Enforcement-Surface Parity.
+
+### The clause asks for something a human does not reliably do
+
+§ Enforcement-Surface Parity asks an author to find every independent validation
+surface. Measured in this repo, that is not reliably achievable. The
+case-sensitivity dimension had to land at ~10 protected-path sites across 4 hooks
+and was missed — **by the orchestrator, while fixing a violation of this very
+clause**. The Bash-lane half shipped and was declared complete; an adversarial
+lens then found the Edit/Write lane fully bypassable: 9/9 canonical paths fenced,
+10/10 case-variants passed. The variant set reached further than the Bash lane's,
+covering the `journal/` and `.claude/team-memory/` subtrees.
+
+That is the strongest available evidence that a rule asking a human to remember an
+enumeration nobody produces is not sufficient on its own.
+
+### The mechanism
+
+Collapse the surfaces onto ONE shared function so a new dimension is one edit, then
+add a test that ENUMERATES the surfaces and fails when a new one re-derives the
+decision locally. The sweep becomes the backstop; the test is the control.
+
+Worked reference:
+
+- `.claude/hooks/lib/guard-path-scope.js` — the `PROTECTED_PATHS` registry. One row
+  per protected path, per-row surface membership (`bash` / `layer3` / `direct` /
+  `coordMode` / `postureGate`), every matcher BUILT from it. Membership is
+  deliberately asymmetric because the surfaces genuinely differ.
+- `tests/integration/multi-operator/protected-path-predicate-1422.test.js` — walks
+  `.claude/hooks/**` and fails if any hook does its own protected-path matching.
+
+### The enumeration test needs its own anti-vacuity control
+
+A scanner that reports zero because it scanned nothing is the recurring instrument
+failure in this corpus. The enumeration test therefore ships controls that run on
+EVERY invocation, not once by hand: synthetic violation shapes that MUST flag,
+legitimate non-decisions that MUST NOT, and a proof the scan reached production
+text. Calibration is honest about reach — see loom#1455: it catches the plain shape
+that real decay takes, not an author who wants to route around it.
+
+### Where duplication is DELIBERATE, consolidation is BLOCKED
+
+The discriminator is whether the copies are an accident or an independence property.
+`CANONICAL_DENY_FLOOR` is hardcoded in `settings-deny-edit-guard.js`,
+`settings-deny-drift-guard.js` and `.claude/bin/reconcile-settings-deny.mjs`
+precisely so poisoning the mutable bin's `CANONICAL_STATE_DENY` cannot reduce the
+enforced floor ("HARDCODED trust anchor (redteam F2)"). Consolidating those onto a
+shared source would destroy the independence the triplication exists to provide;
+`settings-deny-canon-parity.test.mjs` pinning them in lockstep is the correct
+control there. An enumeration test MUST recognise that case structurally — the
+#1422 test treats a permission-matcher string (`Tool(<path>)`) as a DECLARATION
+rather than a path-matching decision — rather than carrying a per-file allowlist,
+which is the shape that lets real fragmentation hide.

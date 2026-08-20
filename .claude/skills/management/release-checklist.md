@@ -2,7 +2,6 @@
 
 Reference material for the /release command.
 
-
 ```bash
 # Core SDK — both must match
 grep 'version' pyproject.toml | head -1
@@ -42,7 +41,7 @@ done
 #### Step 4: Build and Validate
 
 1. Build wheels (and sdist if open-source): `python -m build`
-2. For frameworks: `cd apps/kailash-<name> && python -m build`
+2. For each framework package (e.g. `kailash-dataflow`): `cd packages/kailash-dataflow && python -m build`
 3. Upload to TestPyPI: `twine upload --repository testpypi dist/*.whl`
 4. Verify TestPyPI install in clean venv
 5. For major/minor releases: run smoke tests against TestPyPI package
@@ -113,10 +112,10 @@ Quick reference for all version locations in this monorepo:
 
 | Package          | pyproject.toml                             | **init**.py                                          | SDK Dep     |
 | ---------------- | ------------------------------------------ | ---------------------------------------------------- | ----------- |
-| kailash          | `pyproject.toml`                           | `{package}/__init__.py`                            | —           |
-| kailash-dataflow | `packages/kailash-dataflow/pyproject.toml` | `packages/kailash-dataflow/src/dataflow/__init__.py` | `kailash>=` |
-| kailash-kaizen   | `packages/kailash-kaizen/pyproject.toml`   | `packages/kailash-kaizen/src/kaizen/__init__.py`     | `kailash>=` |
-| kailash-nexus    | `packages/kailash-nexus/pyproject.toml`    | `packages/kailash-nexus/src/nexus/__init__.py`       | `kailash>=` |
+| kailash          | `pyproject.toml`                           | `{package}/__init__.py`                              | —           |
+| kailash-dataflow | the dataflow package (`pyproject.toml`) | the dataflow package (`src/dataflow/__init__.py`) | `kailash>=` |
+| kailash-kaizen   | the kaizen package (`pyproject.toml`)   | the kaizen package (`src/kaizen/__init__.py`)     | `kailash>=` |
+| kailash-nexus    | the nexus package (`pyproject.toml`)    | the nexus package (`src/nexus/__init__.py`)       | `kailash>=` |
 
 ## Agent Teams
 

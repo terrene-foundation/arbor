@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Hook: session-start
- * Event: SessionStart
+ * @hook-event: SessionStart (lifecycle) — the session boundary IS the subject:
+ *   env config, .env and the notes file are all on disk before the first tool
+ *   call, and the banner has to precede it to be read (hook-event-selection.md).
  * Purpose: Discover env config, validate model-key pairings, create .env if
  *          missing, inject session notes into Claude context, output model
  *          configuration prominently.
@@ -17,6 +19,8 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
+// loom#1349 — the ONE hardened append primitive; see lib/append-sink.js for the six defenses.
+const { appendSinkLine } = require("./lib/append-sink.js");
 const {
   parseEnvFile,
   discoverModelsAndKeys,
@@ -32,9 +36,24 @@ const {
   detectActiveWorkspace,
   derivePhase,
   getTodoProgress,
-  findAllSessionNotes,
+  findAllSessionNotesDetailed,
 } = require("./lib/workspace-utils");
 const { checkVersion } = require("./lib/version-utils");
+const {
+  computeOpenPrState,
+  formatOpenPrBlock,
+} = require("./lib/open-pr-surface");
+const {
+  computeUnlandedState,
+  formatUnlandedBlock,
+  openPrHeadsFrom,
+} = require("./lib/unlanded-work-surface");
+const {
+  migrateMonolithToSplit,
+  regenerateAggregate,
+} = require("./lib/session-notes-layout");
+const { ensureCanonicalDriver } = require("./lib/coc-ledger-driver");
+const { resolveIdentity } = require("./lib/operator-id");
 
 // Timeout fallback — prevents hanging the Claude Code session
 const TIMEOUT_MS = 10000;
@@ -46,15 +65,129 @@ const _timeout = setTimeout(() => {
 let input = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => (input += chunk));
+const { readPosture, isPendingWithinGrace } = require("./lib/state-io");
+
 process.stdin.on("end", () => {
   try {
     const data = JSON.parse(input);
     const result = initializeSession(data);
+
+    // Trust-posture gate (mitigates red-team H4 / Phase 1 of trust-posture rollout)
+    let trustGate = "";
+    try {
+      const posture = readPosture(data.cwd);
+      const lines = [];
+      lines.push(
+        `\n## Trust Posture: ${posture.posture}` +
+          (posture._fail_closed
+            ? " (FAIL-CLOSED — state was missing/corrupt)"
+            : "") +
+          (posture._fresh ? " (fresh repo)" : ""),
+      );
+      lines.push(`since: ${posture.since}`);
+      // loom#875 — only surface entries still WITHIN their grace window; a
+      // grace-expired entry must not drive the trust-gate banner (it would
+      // render a nonsensical "day N of 7" for N > 7 and nag forever).
+      const pv = (posture.pending_verification || []).filter(
+        (e) => e && e.rule_id && isPendingWithinGrace(e),
+      );
+      if (pv.length) {
+        lines.push("\n⚠️ TRUST GATE — Verification Pending:");
+        for (const e of pv) {
+          const days = Math.floor(
+            (Date.now() - new Date(e.since).getTime()) / 86400000,
+          );
+          lines.push(
+            `  - ${e.rule_id} (day ${days + 1} of ${e.grace_period_days}). ` +
+              `Violation within grace = EMERGENCY DOWNGRADE. ` +
+              `Include \`[ack: ${e.rule_id}]\` in your first response.`,
+          );
+        }
+      }
+      trustGate = lines.join("\n");
+    } catch {
+      // If readPosture itself fails, surface a quiet warning — don't block session
+      trustGate =
+        "\n## Trust Posture: UNREADABLE — manual /posture init required";
+    }
+
+    // Open-PR session-start surface (orphan-PR guard, issue #574). Fail-open:
+    // computeOpenPrState never throws; a null/undefined state degrades to no
+    // block (undefined) or a "could-not-verify" warning (null). Gated on a
+    // github.com remote so a local-only repo gets no false warning. Prepended
+    // ABOVE the session notes so the live queue outranks any note's claim.
+    //
+    // The state is computed ONCE and used TWICE: the open-PR block renders it,
+    // and the unlanded-work surface below subtracts its head branches. A second
+    // `gh pr list` would cost another ~0.7s of session-start latency for data
+    // already in hand.
+    let openPrBlock = null;
+    let openPrState;
+    try {
+      openPrState = computeOpenPrState(data.cwd);
+      openPrBlock = formatOpenPrBlock(openPrState);
+    } catch {
+      openPrBlock = null; // belt-and-suspenders: never block session start
+      openPrState = undefined; // board UNKNOWN, not "empty" — see openPrHeadsFrom
+    }
+
+    // Unlanded-work surface: the complement of the open-PR block. That one
+    // answers "what is ON the board?"; this answers "what never GOT to the
+    // board?" — local branches with commits not on the upstream default branch
+    // and no open PR. Adds 2 LOCAL git calls and ZERO network calls.
+    //
+    // ADVISORY ONLY. It reports REACHABILITY, which over-reports content: at
+    // loom, 14 of 40 surfaced branches had a PR in history and 9 of those were
+    // merged. It must therefore never gate, auto-reap, or drive a deletion —
+    // the rendered block says so and a test pins that sentence.
+    let unlandedBlock = null;
+    try {
+      unlandedBlock = formatUnlandedBlock(
+        computeUnlandedState(data.cwd, openPrHeadsFrom(openPrState)),
+      );
+    } catch {
+      unlandedBlock = null; // never block session start
+    }
+
+    // Phase-2 deferral surface: the third sibling. The open-PR block answers
+    // "what is ON the board?", unlanded-work answers "what never GOT to the
+    // board?", this answers "what did we PROMISE to build and then not build?"
+    // — the dated backlog in .claude/test-harness/phase2-deferrals.json, which
+    // its own header notes is checked only on a PR/push touching `.claude/**`
+    // and is surfaced to an operator nowhere. Zero subprocesses, zero network:
+    // one stat + one file read.
+    //
+    // LAZY require, and that is load-bearing. `lib/deferral-surface.js` is
+    // loom_only (the registry it reads ships NOWHERE, while `.claude/hooks/**`
+    // is ALWAYS_INCLUDE — both measured with the distributor's own
+    // classifyFile), so THIS file ships to consumers where that lib does not
+    // exist. A module-scope require would throw MODULE_NOT_FOUND before this
+    // handler ever ran and take the whole SessionStart hook down at every
+    // consumer — the #840 broken-on-import pattern. Requiring it here means the
+    // absent lib is just the "skip silently" state.
+    let deferralBlock = null;
+    try {
+      const { renderDeferralBlock } = require("./lib/deferral-surface");
+      // The lib CASCADES since E6 (2026-08-14), so this runs at consumers too.
+      // ONE call that resolves, counts and renders together — the two-call shape
+      // this used to spell out is what let the resolved path go missing, so it
+      // is no longer spelled out anywhere.
+      deferralBlock = renderDeferralBlock(data.cwd);
+    } catch {
+      deferralBlock = null; // lib absent (partial sync) or failed — never block
+    }
+
     const output = { continue: true };
-    if (result.sessionNotesContext) {
+    const ctxParts = [];
+    if (openPrBlock) ctxParts.push(openPrBlock);
+    if (unlandedBlock) ctxParts.push(unlandedBlock);
+    if (deferralBlock) ctxParts.push(deferralBlock);
+    if (result.sessionNotesContext) ctxParts.push(result.sessionNotesContext);
+    if (trustGate) ctxParts.push(trustGate);
+    if (ctxParts.length) {
       output.hookSpecificOutput = {
         hookEventName: "SessionStart",
-        additionalContext: result.sessionNotesContext,
+        additionalContext: ctxParts.join("\n\n"),
       };
     }
     console.log(JSON.stringify(output));
@@ -154,10 +287,28 @@ function initializeSession(data) {
 
   // ── Log observation ───────────────────────────────────────────────────
   try {
+    // loom#1349 R1 F3 — routed through the shared hardened primitive. The row carries
+    // session_id + cwd, so a symlinked sink lands correlatable session telemetry outside the
+    // gitignore fence at world-readable 0o644.
+    // R2 F1 — `resolveLearningDir` resolves to the MAIN checkout (or an explicit
+    // `KAILASH_LEARNING_DIR`), so this sink escapes cwd BY DESIGN; both legitimate roots are
+    // declared. A symlinked `.claude/learning` still resolves under neither and is refused.
     const observationsFile = path.join(learningDir, "observations.jsonl");
-    fs.appendFileSync(
-      observationsFile,
-      JSON.stringify({
+    const stateRoots = [];
+    if (process.env.KAILASH_LEARNING_DIR)
+      stateRoots.push(process.env.KAILASH_LEARNING_DIR);
+    try {
+      const { resolveMainCheckout } = require("./lib/state-resolver.js");
+      const main = resolveMainCheckout(cwd);
+      if (main) stateRoots.push(main);
+    } catch {
+      // Resolver unavailable — cwd remains the only root; a main-checkout sink fails closed.
+    }
+    appendSinkLine({
+      repoDir: cwd,
+      additionalRoots: stateRoots,
+      sinkPath: observationsFile,
+      line: JSON.stringify({
         type: "session_start",
         session_id,
         cwd,
@@ -169,8 +320,8 @@ function initializeSession(data) {
         validationFailures: discovery.validations
           .filter((v) => v.status === "MISSING_KEY")
           .map((v) => v.message),
-      }) + "\n",
-    );
+      }),
+    });
   } catch {}
 
   // ── Version check (human-facing, stderr only) ─────────────────────────
@@ -193,9 +344,66 @@ function initializeSession(data) {
     }
   } catch {}
 
+  // ── Session-notes coherence: zero-touch migrate + aggregate (C5, #743) ─
+  // Migrate a legacy monolith into the per-operator split ONCE (idempotent —
+  // no-op when already split or no monolith present) and regenerate the
+  // read-only by-name aggregate. EVERY path is wrapped so a failure NEVER
+  // blocks session start (C5.2 fail-open; cc-artifacts.md Rule 7). Runs BEFORE
+  // the notes surface below so the dashboard reflects current on-disk truth.
+  try {
+    const identity = resolveIdentity(cwd, {});
+    if (identity) {
+      const mig = migrateMonolithToSplit(cwd, identity);
+      if (mig && mig.ok && mig.migrated) {
+        console.error(
+          "[SESSION-NOTES] Migrated legacy .session-notes → per-operator split (.session-notes.d/); original preserved as .session-notes.migrated.",
+        );
+      }
+    }
+    // Regenerate the aggregate regardless (belt: reflects any fragment change).
+    // The writer self-refuses if the target is not gitignored (C2.2), so an
+    // errored/absent-gitignore state is a silent no-op here, never a throw.
+    regenerateAggregate(cwd);
+  } catch (e) {
+    console.error(`[SESSION-NOTES] Coherence pass skipped: ${e.message}`);
+  }
+
+  // ── Ledger merge-driver self-heal (G1, journal/0418) ─────────────────────
+  // If this repo opts into the coc-ledger 3-way merge driver (.gitattributes)
+  // but this clone's local registration is missing or NON-CANONICAL (the
+  // loom#741 bare-path form that fails `Permission denied` and silently falls
+  // back to the default line-merge, clobbering .session-notes.shared.md rows),
+  // register the canonical driver in LOCAL git config. Idempotent + fail-open;
+  // a not-referenced / already-canonical repo writes nothing. Closes the silent
+  // multi-operator clobber window without a manual `loom doctor --fix`.
+  try {
+    const drv = ensureCanonicalDriver({ repoRoot: cwd });
+    if (drv && drv.action === "registered") {
+      console.error(
+        "[MERGE-DRIVER] Registered canonical coc-ledger 3-way merge driver" +
+          (drv.before
+            ? ` (was non-canonical: ${drv.before})`
+            : " (was unregistered)") +
+          " — protects .session-notes.shared.md from clobber (journal/0418 G1).",
+      );
+    }
+  } catch {}
+
   // ── Session notes (inject into Claude context + human-facing stderr) ─
   try {
-    const allNotes = findAllSessionNotes(cwd);
+    const { notes: allNotes, unreadable } = findAllSessionNotesDetailed(cwd);
+    // Fail-open, but never silent (loom#1655): a refused notes file is skipped
+    // so one bad row cannot blank the dashboard, yet the operator is told it
+    // exists. Silence here is indistinguishable from "there are no notes", and
+    // the wrong one of those two sends the next session off without its
+    // handover. stderr ONLY — this is human-facing and costs no injected bytes.
+    if (unreadable.length > 0) {
+      for (const u of unreadable) {
+        console.error(
+          `[SESSION-NOTES] UNREADABLE ${u.relativePath} (${u.reason}) — present but not surfaced`,
+        );
+      }
+    }
     if (allNotes.length > 0) {
       for (const note of allNotes) {
         const staleTag = note.stale ? " (STALE)" : "";
