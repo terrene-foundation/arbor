@@ -9,15 +9,16 @@
     "template_version": "1.23.0",
     "synced_at": "2026-08-20T05:02:59.806Z",
     "sdk_packages": {
-      "kailash": "2.12.0",
-      "kailash-dataflow": "2.4.0",
-      "kailash-nexus": "2.3.0",
-      "kailash-kaizen": "2.13.1",
-      "kailash-pact": "0.11.0",
-      "kailash-mcp": "0.2.10",
-      "kailash-ml": "1.6.0",
-      "kailash-align": "0.7.0",
-      "kaizen-agents": "0.9.4"
-    }
+      "kailash": "2.63.0",
+      "kailash-dataflow": "2.20.0",
+      "kailash-nexus": "2.16.0",
+      "kailash-kaizen": "2.46.0",
+      "kailash-pact": "0.18.0",
+      "kailash-mcp": "0.5.1",
+      "kailash-ml": "2.2.2",
+      "kailash-align": "0.7.4",
+      "kaizen-agents": "0.13.0"
+    },
+    "sdk_packages_note": "Records the versions ACTUALLY RESOLVED in uv.lock, not the template's declared set. pyproject.toml uses >= floors (repo convention) with uv.lock as the real pin, so resolution landed slightly above the template's declared kailash 2.62.0 / dataflow 2.19.1 / nexus 2.15.0 / kaizen 2.45.0 / kaizen-agents 0.12.0. kailash-ml and kailash-align are NOT imported by Arbor and NOT pinned in pyproject.toml — their entries mirror the template's declaration and are tracked here only."
   }
 }
