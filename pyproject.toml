@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hr-ai-advisory"
-version = "0.5.0"
+version = "0.5.1"
 description = "AI-powered HR advisory platform for Singapore SMEs"
 authors = [
     {name = "Terrene Foundation", email = "dev@arbor.sg"}
