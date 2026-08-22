@@ -237,7 +237,20 @@ def _try_redis_blocklist() -> RedisBlocklist | None:
         client.ping()
         return RedisBlocklist(client)
     except Exception as exc:
-        logger.warning("Could not connect to Redis for token blocklist: %s", exc)
+        # REDIS_URL was SET and the connection failed — a fault, not a dev default.
+        # ERROR, not WARNING: the caller falls back to InMemoryBlocklist, so the
+        # service keeps serving and revocation keeps working WITHIN this process —
+        # but it stops propagating across replicas and is lost on restart. A token
+        # revoked on one replica is still accepted by every other replica until it
+        # expires. That is a security-relevant reduction with no other loud signal,
+        # and it is reported as `degraded` on /api/health/detailed.
+        logger.error(
+            "Token blocklist: REDIS_URL is set but unreachable (%s: %s). "
+            "Falling back to per-process in-memory revocation — revocations will "
+            "NOT propagate across replicas and are lost on restart.",
+            type(exc).__name__,
+            exc,
+        )
         return None
 
 

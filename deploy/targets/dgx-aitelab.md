@@ -160,10 +160,17 @@ target would be expected to close most of them through managed services.
 | Outstanding             | `v0.5.0` is tagged and built but **not rolled out**. Blocked on jumper authentication (401). |
 | Health at last check    | `/api/health` → `{"status":"healthy"}` (2026-08-22)                                          |
 
-The backend exposes **no version endpoint**, so the running version cannot be
-determined from outside the cluster. `/api/version` returns 404. Confirming what is
-deployed requires the jumper — treat any claim about the running version that is not
-backed by a `kubectl get deploy` reading as unverified.
+**Resolved in v0.5.0:** the running version is now readable without the jumper.
 
-Adding a version field to `/api/health` would remove that blind spot and is worth
-doing before the next deployment target is stood up.
+```sh
+curl -sS https://arbor.aitelab.net/api/version
+# {"service":"arbor-backend","version":"0.5.0"}
+```
+
+Until v0.5.0 is actually rolled out, this endpoint still 404s here — that 404 is
+itself the signal that the rollout has not happened. Once it answers, verifying a
+deploy on this target no longer needs control-plane access at all; only the
+`kubectl set image` step does.
+
+That is worth noting for the cloud targets: **rollout verification is now an external
+`curl` on every target**, which is one fewer reason to hold control-plane credentials.

@@ -144,7 +144,19 @@ class RedisSessionStore:
             self._redis.ping()
             logger.info("Redis session store connected")
         except Exception as exc:
-            logger.warning("Redis unavailable (%s), falling back to in-memory sessions", exc)
+            # RedisSessionStore is only constructed when a redis_url was supplied,
+            # so reaching here means Redis was CONFIGURED and is unreachable — a
+            # fault, not an expected dev path. ERROR, not WARNING: the in-memory
+            # fallback keeps the service serving, but sessions become per-process,
+            # so they are lost on restart and do not work across replicas.
+            # Reported as `degraded` on /api/health/detailed.
+            logger.error(
+                "Session store: Redis configured but unreachable (%s: %s). "
+                "Falling back to per-process in-memory sessions — sessions will be "
+                "lost on restart and will NOT work across replicas.",
+                type(exc).__name__,
+                exc,
+            )
             self._redis = None
             self._using_fallback = True
 

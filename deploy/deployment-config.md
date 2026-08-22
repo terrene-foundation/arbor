@@ -37,10 +37,21 @@ that was never checked against it.
 | LLM             | Provider-agnostic                         | Ollama where a GPU is attached; BYOK supports OpenAI / Anthropic / Gemini                            |
 | Config          | Env vars from the platform's secret store | K8s Secret/ConfigMap, Key Vault, Secrets Manager, Secret Manager — the variable surface is identical |
 
-**Redis is not optional.** Both consumers degrade _silently_ when it is absent:
-sessions fall back to in-memory (lost on restart, broken across replicas) and the JWT
-token blocklist disables itself, so revoked tokens stay valid until expiry. Any target
-MUST provision Redis, whether in-cluster or managed.
+**Redis is not optional.** Both consumers fail SOFT when it is absent — the service
+keeps serving with reduced guarantees:
+
+- **Sessions** fall back to in-memory: lost on restart, and not shared across replicas.
+- **JWT token revocation** falls back to `InMemoryBlocklist`: revocation still works
+  _within a single process_, but does not propagate across replicas and is lost on
+  restart. A token revoked on one replica stays accepted by every other replica
+  until it expires.
+
+Any target MUST provision Redis, whether in-cluster or managed.
+
+Since v0.5.0 this degradation is **no longer silent**: a configured-but-unreachable
+Redis logs at ERROR (not WARNING) at the point of fallback, and reports
+`"status": "degraded"` with a stated impact on `/api/health/detailed`. An absent
+`REDIS_URL` reports `not_configured` instead — a deployment choice, not a fault.
 
 ## Architecture (logical — substrate-independent)
 
@@ -162,21 +173,45 @@ retained, so the prior tag is always a valid rollback destination.
 
 ### Verifying what is actually deployed
 
-The backend exposes **no version endpoint** today — `/api/version` returns 404 — so
-the running version cannot be read from outside a deployment. Determining it requires
-control-plane access on that target.
+Since **v0.5.0** the running version is readable from outside every deployment, with
+no control-plane access:
 
-Treat any claim about a deployed version that is not backed by a control-plane reading
-as unverified. Adding a version field to `/api/health` would close this across every
-target at once and is worth doing before a second deployment is stood up.
+```sh
+curl -sS https://<target-domain>/api/version
+# {"service":"arbor-backend","version":"0.5.0"}
+```
+
+`/api/version` depends on nothing — no database, no cache — so it answers even when
+the deployment is otherwise broken. That is deliberate: it is the endpoint an operator
+reaches for _because_ something is wrong.
+
+Before v0.5.0 this was impossible (`/api/version` returned 404 and `/api/health`
+carried no version), so verifying a rollout required control-plane access on the
+target. Any pre-0.5.0 deployment still has that blind spot.
 
 ## Health Check Endpoints
 
-| Endpoint               | Method | Expected | Description               |
-| ---------------------- | ------ | -------- | ------------------------- |
-| `/api/health`          | GET    | 200 OK   | Basic liveness            |
-| `/api/health/ready`    | GET    | 200 OK   | Readiness (DB connected)  |
-| `/api/health/detailed` | GET    | 200 OK   | Detailed component status |
+All four are served by the mounted API sub-app and reachable through the ingress.
+
+| Endpoint               | Method | Healthy | Unhealthy | Purpose                                    |
+| ---------------------- | ------ | ------- | --------- | ------------------------------------------ |
+| `/api/version`         | GET    | 200     | 200       | Running version. No dependencies.          |
+| `/api/health`          | GET    | 200     | 503       | Liveness — is the process serving?         |
+| `/api/health/ready`    | GET    | 200     | 503       | Readiness — DB reachable, safe to route to |
+| `/api/health/detailed` | GET    | 200     | 503       | Per-component status incl. soft-degraded   |
+
+`/api/health/detailed` returns **200 for `degraded`**, not 503. A degraded instance is
+still serving; returning 503 would pull it from rotation and convert a
+reduced-guarantee state into an outage. The distinction is carried in the body —
+`status` is one of `healthy` / `degraded` / `down` — which is what a monitor should
+read. Only `down` returns 503.
+
+`/api/version` returns 200 even when everything else is failing, by design: it depends
+on nothing.
+
+**Prior to v0.5.0, `/api/health/ready` and `/api/health/detailed` were documented here
+but did not exist** — both returned 404. They are implemented as of v0.5.0. Anything
+targeting an older deployment should probe `/api/health` only.
 
 ## Backup, Monitoring, Cost — per-target
 

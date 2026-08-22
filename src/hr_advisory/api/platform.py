@@ -146,8 +146,15 @@ def _register_health(fast_api) -> None:
             if cm is not None and hasattr(cm, "test_connection"):
                 result = await asyncio.wait_for(cm.test_connection(), timeout=5.0)
                 db_ok = result.get("status") == "connected"
-        except Exception:
-            pass
+        except Exception as exc:
+            # Act, don't swallow (zero-tolerance Rule 3): db_ok stays False, so the
+            # handler below returns 503 and the probe pulls this instance out of
+            # rotation. Log the reason — without it, "unhealthy" reaches the
+            # operator with no cause attached and every incident starts by
+            # re-deriving what this line already knew.
+            logger.warning(
+                "Health probe: database unreachable (%s: %s)", type(exc).__name__, exc
+            )
 
         if db_ok:
             return {"status": "healthy", "db": "ok"}
@@ -204,10 +211,88 @@ def _register_routers(app: Nexus) -> None:
     api.include_router(admin_router)  # Admin router has its own /admin prefix
     api.include_router(qa_router)  # QA router has its own /admin/qa prefix
 
+    _register_meta_endpoints(api)
+
     # Mount the FastAPI sub-app on the Nexus gateway
     app._gateway.app.mount("", api)
 
     logger.info("All API routers registered (including MCP integrations)")
+
+
+def _register_meta_endpoints(api) -> None:
+    """Register /version, /health/ready and /health/detailed on the API sub-app.
+
+    These live on the mounted sub-app rather than the Nexus gateway on purpose.
+    Nexus serves its own ``/health`` at the gateway root, which SHADOWS anything
+    registered there — so a version field added to the gateway handler would never
+    be visible to a caller. The sub-app is what serves ``/api/*`` through the
+    ingress, which is the surface an operator actually reaches.
+
+    Why these exist (see ``deploy/deployment-config.md``):
+
+    * ``/version`` — Arbor runs in multiple deployments and the running version
+      could not previously be read from outside any of them, so verifying a
+      rollout required control-plane access. It no longer does.
+    * ``/health/ready`` — readiness distinct from liveness, for probes and
+      load-balancer target groups on every substrate.
+    * ``/health/detailed`` — surfaces components that fail SOFT, which a plain
+      liveness check reports as healthy by construction.
+    """
+    from fastapi.responses import JSONResponse
+
+    from hr_advisory import __version__
+    from hr_advisory.api.health_components import (
+        overall_status,
+        probe_database,
+        probe_llm_config,
+        probe_redis,
+    )
+
+    @api.get("/version", tags=["Meta"])
+    async def version_info():
+        """Return the running version. Cheap, dependency-free, always 200."""
+        return {"service": "arbor-backend", "version": __version__}
+
+    @api.get("/health/ready", tags=["Meta"])
+    async def health_ready():
+        """Readiness: can this instance serve traffic right now?
+
+        Distinct from liveness. A soft-degraded component does NOT make an
+        instance unready — it can still serve — so only the database, which the
+        service cannot answer without, gates readiness.
+        """
+        db = await probe_database()
+        if db.get("status") == "ok":
+            return {"status": "ready", "db": db}
+        return JSONResponse(content={"status": "not_ready", "db": db}, status_code=503)
+
+    @api.get("/health/detailed", tags=["Meta"])
+    async def health_detailed():
+        """Per-component status, including soft-degraded components.
+
+        Returns 200 for both ``healthy`` and ``degraded`` — a degraded instance is
+        still serving, and returning 503 would pull it out of rotation and turn a
+        reduced-guarantee state into an outage. The distinction is carried in the
+        body, which is what an operator or a monitor should be reading. Only
+        ``down`` returns 503.
+        """
+        components = {
+            "database": await probe_database(),
+            "redis": probe_redis(),
+            "llm": probe_llm_config(),
+        }
+        status = overall_status(components)
+        body = {
+            "status": status,
+            "service": "arbor-backend",
+            "version": __version__,
+            "components": components,
+        }
+        if status == "down":
+            return JSONResponse(content=body, status_code=503)
+        return body
+
+    logger.info("Meta endpoints registered (/version, /health/ready, /health/detailed)")
 
 
 def _register_handlers(app: Nexus, session_store) -> None:
