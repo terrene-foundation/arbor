@@ -4,11 +4,11 @@ Project-specific skills for Arbor (HRIS + AI advisory for SG SMEs). Use this ind
 
 ## Platform & Architecture
 
-| File                                                 | When to use                                                                                         |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| [platform-architecture.md](platform-architecture.md) | Adding endpoints, middleware, component connections                                                 |
-| [pool-safety.md](pool-safety.md)                     | Connection pool sizing, lifecycle, leak detection                                                   |
-| [k8s-deploy.md](k8s-deploy.md)                       | Rolling out a new image to the DGX K8s cluster (the only env) via the `arbordev.aitelab.net` jumper |
+| File                                                 | When to use                                                                   |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [platform-architecture.md](platform-architecture.md) | Adding endpoints, middleware, component connections                           |
+| [pool-safety.md](pool-safety.md)                     | Connection pool sizing, lifecycle, leak detection                             |
+| [k8s-deploy.md](k8s-deploy.md)                       | Deploying Arbor to any target. Per-deployment notes live in `deploy/targets/` |
 
 ## HRIS Engine
 
@@ -53,6 +53,6 @@ Project-specific skills for Arbor (HRIS + AI advisory for SG SMEs). Use this ind
 
 ## Frontend (apps/web)
 
-| File                                                       | When to use                                                                                                                            |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| [frontend-data-fetching.md](frontend-data-fetching.md)     | Adding/migrating data-fetch logic. TanStack Query patterns, per-hook staleTime decisions, key= for refetch flows, useEffect antipatterns |
+| File                                                   | When to use                                                                                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| [frontend-data-fetching.md](frontend-data-fetching.md) | Adding/migrating data-fetch logic. TanStack Query patterns, per-hook staleTime decisions, key= for refetch flows, useEffect antipatterns |
