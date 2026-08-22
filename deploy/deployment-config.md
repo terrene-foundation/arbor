@@ -2,39 +2,67 @@
 
 > **Migration note (2026-05-07):** This is a legacy prose-only config. Per `rules/deploy-hygiene.md` § Exceptions, run `/deploy --onboard` to migrate to the YAML-frontmatter form documented in `.claude/skills/10-deployment-git/application-deployment.md` § "deployment-config.md Schema". Until migrated, agents fall back to manual verification.
 
-## Decision Summary
+## Scope: this file is TARGET-NEUTRAL
 
-| Decision      | Choice                                     | Rationale                                                                                                      |
-| ------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Cluster       | DGX K8s (`arbor.aitelab.net`)              | Single environment owned by the Foundation; GPU-attached for Ollama                                            |
-| Orchestration | Kubernetes deployments + services          | Native pod scheduling, rolling updates, health probes                                                          |
-| Ingress       | Cloudflare → in-cluster ingress            | TLS terminated at Cloudflare; ingress routes `/api/*` to backend, `/*` to frontend                             |
-| Domain        | `arbor.aitelab.net`                        | Production. There is no separate staging environment.                                                          |
-| Build         | GitHub Actions → Docker Hub                | Tag push of `v*` triggers `.github/workflows/docker-publish.yml`                                               |
-| Rollout       | `kubectl set image` from in-cluster jumper | `arbordev.aitelab.net` ttyd terminal → `arbor-jumper` pod                                                      |
-| Database      | PostgreSQL 16 + pgvector (in-cluster)      | Vector search for KB embeddings. PVC `arbor-pgdata` is non-persistent — see `specs/k8s-staging-resilience.md`. |
-| Cache         | Redis 7 (in-cluster)                       | Session management                                                                                             |
-| LLM           | Ollama (in-cluster, GPU-attached)          | qwen3 default; BYOK supports OpenAI/Anthropic/Gemini                                                           |
+Arbor is an enterprise SaaS product and runs in **multiple deployments** — the
+Foundation's DGX cluster today, with Azure, AWS and Google Cloud deployments planned.
 
-## Architecture
+This file holds only what is true of Arbor **wherever it runs**: the container
+images, the environment-variable contract, the health-check endpoints, and the shape
+of a release. Everything specific to one deployment — its domain, topology, access
+path, exact rollout commands, failure modes, and current version — lives in its own
+file under [`targets/`](targets/README.md).
+
+**Per-target notes:**
+
+| Target                                   | File                                               | Status              |
+| ---------------------------------------- | -------------------------------------------------- | ------------------- |
+| `dgx-aitelab` (DGX, `arbor.aitelab.net`) | [`targets/dgx-aitelab.md`](targets/dgx-aitelab.md) | live                |
+| Azure / AWS / Google Cloud               | —                                                  | not yet provisioned |
+
+Do not add target-specific facts here. If a claim is only true on one deployment, it
+belongs in that target's file — otherwise the next deployment inherits an assumption
+that was never checked against it.
+
+## Platform Decisions (target-neutral)
+
+| Decision        | Choice                                    | Rationale                                                                                            |
+| --------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Packaging       | Two OCI images (backend, frontend)        | Same artifacts run on any container substrate                                                        |
+| Build           | GitHub Actions → Docker Hub               | Tag push of `v*` triggers `.github/workflows/docker-publish.yml`                                     |
+| Image tag       | git tag minus the leading `v`             | `v0.5.0` → image `0.5.0`                                                                             |
+| Backend runtime | `AsyncLocalRuntime`                       | Required in containers — `LocalRuntime` hangs                                                        |
+| Database        | PostgreSQL 16 + **pgvector**              | Vector search for KB embeddings. pgvector is a hard requirement on every target.                     |
+| Cache           | Redis 7                                   | Sessions **and** the JWT token blocklist — see the note below                                        |
+| LLM             | Provider-agnostic                         | Ollama where a GPU is attached; BYOK supports OpenAI / Anthropic / Gemini                            |
+| Config          | Env vars from the platform's secret store | K8s Secret/ConfigMap, Key Vault, Secrets Manager, Secret Manager — the variable surface is identical |
+
+**Redis is not optional.** Both consumers degrade _silently_ when it is absent:
+sessions fall back to in-memory (lost on restart, broken across replicas) and the JWT
+token blocklist disables itself, so revoked tokens stay valid until expiry. Any target
+MUST provision Redis, whether in-cluster or managed.
+
+## Architecture (logical — substrate-independent)
 
 ```
 Internet
   │
   ▼
-Cloudflare (TLS, WAF, caching) — arbor.aitelab.net
+edge (TLS, WAF, caching)          per-target: Cloudflare, Front Door, CloudFront, Cloud CDN
   │
   ▼
-DGX K8s cluster, namespace=arbor
+ingress / router                  routes /api/* → backend, /* → frontend
   │
-  ├── ingress (routes /api/* → backend, /* → frontend)
-  ├── deploy/arbor-backend   (FastAPI, port 8000, image=terrenefoundation/arbor-backend)
-  ├── deploy/arbor-frontend  (Next.js standalone, port 3000, image=terrenefoundation/arbor-frontend)
-  ├── deploy/arbor-jumper    (ttyd at arbordev.aitelab.net, namespace-locked SA)
-  ├── deploy/postgres        (PostgreSQL 16 + pgvector, PVC arbor-pgdata)
-  ├── deploy/redis           (Redis 7)
-  └── deploy/ollama          (Ollama, GPU reservation, PVC for model cache)
+  ├── backend    FastAPI, port 8000,  image terrenefoundation/arbor-backend
+  ├── frontend   Next.js standalone, port 3000, image terrenefoundation/arbor-frontend
+  ├── postgres   PostgreSQL 16 + pgvector      in-cluster OR managed
+  ├── redis      Redis 7                       in-cluster OR managed
+  └── llm        Ollama (GPU) OR a BYOK provider endpoint
 ```
+
+Which of Postgres / Redis / the LLM are self-hosted versus managed is a **per-target**
+choice with different failure modes, backup guarantees and cost — recorded in the
+target file, not here.
 
 ## Container Images
 
@@ -114,20 +142,33 @@ Integration env vars are only needed when enabling specific connectors. The plat
 
 ## Deployment Runbook
 
-The full runbook lives in `.claude/skills/project/k8s-deploy.md`. Summary:
+Steps 1–2 are the same for **every** target — one build produces the artifacts every
+deployment consumes. Steps 3–5 are **per-target**: read the target's file for the exact
+commands.
 
 1. **Tag & push** — `git tag v<X.Y.Z> && git push origin v<X.Y.Z>` triggers the GH Actions matrix build (backend + frontend, multi-arch). Push tags one at a time (per `rules/deployment.md`).
-2. **Verify build** — `gh run view <run-id>` shows both `build-and-push` jobs green; images on Docker Hub at `terrenefoundation/arbor-{backend,frontend}:<X.Y.Z>`.
-3. **Roll out** — Open `https://arbordev.aitelab.net` (ttyd jumper). On the jumper:
-   - `apk add --no-cache kubectl` (kubectl is not baked into the jumper image; lost on restart per `specs/k8s-staging-resilience.md` Rule 2).
-   - Pre-rollout check: compare running image + pod `startedAt` vs. build completion time. If pods are already on the target tag, skip `set image`.
-   - `kubectl set image -n arbor deploy/arbor-backend backend=terrenefoundation/arbor-backend:<X.Y.Z>` and the same for `arbor-frontend`/`frontend`.
-   - `kubectl rollout status -n arbor deploy/arbor-backend --timeout=180s` (and frontend).
-4. **Smoke test** — `curl https://arbor.aitelab.net/api/health` returns `{"status":"healthy"}`; landing page renders.
+2. **Verify build** — `gh run view <run-id>` shows both `build-and-push` jobs green; images on Docker Hub at `terrenefoundation/arbor-{backend,frontend}:<X.Y.Z>` (image tag drops the leading `v`).
+3. **Pre-rollout check** _(per target)_ — compare the running image **and** its start time against the build completion time. If the target already carries the tag, the rollout is done; skip it.
+4. **Roll out** _(per target)_ — the mechanism differs by substrate: `kubectl set image` on self-managed K8s, a revision/slot swap on a managed-container service. See the target file.
+5. **Smoke test** _(per target)_ — the target's public health URL returns `{"status":"healthy"}` and the landing page renders. Verify from **outside** the deployment, not from the control plane.
+
+Target procedures: [`targets/dgx-aitelab.md`](targets/dgx-aitelab.md).
 
 ### Rollback
 
-Roll back to a prior published tag by `kubectl set image` to that tag, or `kubectl rollout undo deploy/arbor-backend -n arbor`.
+Every target MUST document a verified rollback command in its own file, and MUST be
+able to return to a previously published image tag. The images are immutable and
+retained, so the prior tag is always a valid rollback destination.
+
+### Verifying what is actually deployed
+
+The backend exposes **no version endpoint** today — `/api/version` returns 404 — so
+the running version cannot be read from outside a deployment. Determining it requires
+control-plane access on that target.
+
+Treat any claim about a deployed version that is not backed by a control-plane reading
+as unverified. Adding a version field to `/api/health` would close this across every
+target at once and is worth doing before a second deployment is stood up.
 
 ## Health Check Endpoints
 
@@ -137,15 +178,22 @@ Roll back to a prior published tag by `kubectl set image` to that tag, or `kubec
 | `/api/health/ready`    | GET    | 200 OK   | Readiness (DB connected)  |
 | `/api/health/detailed` | GET    | 200 OK   | Detailed component status |
 
-## Backup & Recovery
+## Backup, Monitoring, Cost — per-target
 
-- PostgreSQL PVC `arbor-pgdata` is currently non-persistent (data is lost on DGX reboot). Full recovery playbook + planned hardening in `specs/k8s-staging-resilience.md`.
-- No automated daily backups today; pending the PVC migration.
+These three are **properties of a deployment, not of Arbor**, and they diverge sharply
+between a self-hosted cluster and a managed cloud. Each target file records its own
+state, including honest "not configured yet" entries.
 
-## Monitoring
+What every target owes, regardless of substrate:
 
-Not yet configured. Cloudflare provides basic uptime; in-cluster Prometheus / GPU monitoring is on the hardening roadmap.
+- **Persistence** — Postgres data survives a restart of the substrate. State plainly
+  whether it does; on `dgx-aitelab` today it does **not**.
+- **Backup** — a stated recovery point objective, or an explicit record that there is
+  no automated backup.
+- **Monitoring** — at minimum liveness; ideally the `/api/health/detailed` component
+  surface scraped on an interval.
+- **Cost** — who pays and roughly what. A Foundation-owned box and a cloud
+  subscription are not comparable and should not be summarised together.
 
-## Cost
-
-Cluster is part of the DGX hardware footprint owned by the Foundation. No GCP/AWS bill attached to Arbor itself.
+Current per-target state: [`targets/dgx-aitelab.md`](targets/dgx-aitelab.md)
+§ "Persistence, backup, monitoring".

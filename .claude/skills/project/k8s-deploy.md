@@ -1,60 +1,107 @@
-# K8s Deploy (DGX `arbor.aitelab.net`)
+# Deploying Arbor to a Target
 
-Roll a published image (`terrenefoundation/arbor-{backend,frontend}:<version>`) onto the DGX K8s cluster. Build is GH Actions → Docker Hub; rollout is jumper-pod kubectl.
+Arbor is an enterprise SaaS product with **multiple deployments** — the Foundation's
+DGX cluster today, with Azure, AWS and Google Cloud planned. This skill is the
+target-neutral procedure. **Every deployment-specific fact lives in that
+deployment's own file** under `deploy/targets/`.
 
-**There is one environment.** `arbor.aitelab.net` is production. There is no separate staging or GCE `arbor-prod`; references to those are fictional (see `deploy/deployment-config.md` and friends, pending purge).
+**Step 0 is always: identify the target and open its file.**
 
-## Access
+| Target                              | File                            | Status              |
+| ----------------------------------- | ------------------------------- | ------------------- |
+| `dgx-aitelab` (`arbor.aitelab.net`) | `deploy/targets/dgx-aitelab.md` | live                |
+| Azure / AWS / Google Cloud          | —                               | not yet provisioned |
 
-- **Public app:** `https://arbor.aitelab.net` (Cloudflare → ingress → frontend/backend)
-- **Jumper web terminal:** `https://arbordev.aitelab.net` (ttyd → in-cluster `arbor-jumper` pod, namespace-locked to `arbor`)
+Registry + the contract for adding a new target: `deploy/targets/README.md`.
+Target-neutral platform facts (images, env contract, health endpoints):
+`deploy/deployment-config.md`.
 
-The jumper is reached via browser only (no SSH key, no local kubeconfig). Drive it via playwright-mcp. The xterm.js textbox accepts `mcp__playwright__browser_type` against `.xterm-helper-textarea` with `submit: true` to send Enter.
+## Do not generalise across targets
 
-## Prerequisites
+The DGX deployment reaches its control plane through a browser-only ttyd jumper,
+runs Postgres/Redis/Ollama as in-cluster pods, rolls out with `kubectl set image`,
+and has **no staging sibling**. Every one of those is a property of _that_ target. A
+managed-container deployment may share none of them.
 
-1. Image already on Docker Hub. Verify with `gh run view <run-id>` — both `build-and-push` jobs green.
-2. Tag matches what was just released (e.g., `0.4.9`). The leading `v` is dropped in the image tag.
+Read the target's file before running anything. Carrying a DGX assumption onto a
+cloud deployment is the failure mode this split exists to prevent.
 
-## Rollout Flow
+## Procedure
 
+### 1. Build (shared across all targets)
+
+One build produces the artifacts every deployment consumes.
+
+```sh
+git tag -a v<X.Y.Z> -m "<summary>" && git push origin v<X.Y.Z>
+gh run list --limit 5          # find the "Publish Docker Images" run
+gh run watch <run-id> --exit-status
 ```
-1. Open https://arbordev.aitelab.net via playwright-mcp → confirm prompt is `~ #` on `arbor-jumper-*`
-2. apk add --no-cache kubectl       # kubectl is NOT baked in; lost on every pod restart
-3. kubectl get deploy -n arbor      # confirm arbor-backend, arbor-frontend exist
-4. Verify deployment image + pod start time vs. build completion time:
-   kubectl get deploy/arbor-backend deploy/arbor-frontend -n arbor \
-     -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.template.spec.containers[*].image}{"\n"}{end}'
-   kubectl get pods -n arbor -l 'app in (arbor-backend,arbor-frontend)' \
-     -o custom-columns=NAME:.metadata.name,IMAGE:.status.containerStatuses[*].image,STARTED:.status.containerStatuses[*].state.running.startedAt
-5. If image is older than target version, run rollout (skip if already current — see "Pre-Rollout Check" below):
-   kubectl set image -n arbor deploy/arbor-backend backend=terrenefoundation/arbor-backend:<version>
-   kubectl set image -n arbor deploy/arbor-frontend frontend=terrenefoundation/arbor-frontend:<version>
-   kubectl rollout status -n arbor deploy/arbor-backend --timeout=180s
-   kubectl rollout status -n arbor deploy/arbor-frontend --timeout=180s
-6. Smoke test:
-   curl -sS https://arbor.aitelab.net/api/health     # expect {"status":"healthy", ...}
-   playwright-mcp navigate https://arbor.aitelab.net/   # expect landing page renders
+
+Both `build-and-push` jobs must be green. **The image tag drops the leading `v`** —
+`v0.5.0` publishes `0.5.0`.
+
+Confirm the images are actually on the registry before touching any deployment —
+a green build is necessary, not sufficient:
+
+```sh
+curl -sS "https://hub.docker.com/v2/repositories/terrenefoundation/arbor-backend/tags/<X.Y.Z>"
+curl -sS "https://hub.docker.com/v2/repositories/terrenefoundation/arbor-frontend/tags/<X.Y.Z>"
 ```
 
-## Pre-Rollout Check (MUST)
+### 2. Pre-rollout check (MUST, per target)
 
-Compare deployment image + pod `startedAt` against the GH Actions build completion time **before** running `kubectl set image`. If pods came up after the build finished and image already matches the target tag, the rollout is already done — likely via auto-deploy hook or a prior session. Re-applying `set image` with the same tag is a no-op but logs a meaningless event; verifying first prevents the assumption that rollout is still pending when the cluster is already on the new version.
+Before rolling, compare **the running image and its start time** against the build
+completion time. If the deployment already carries the target tag and started after
+the build, the rollout is already done — via a prior session or an auto-deploy path —
+and re-applying it only logs a meaningless event.
 
-**Origin:** 2026-05-07 — session-notes said the cluster was on v0.4.5 awaiting v0.4.9 rollout; in fact pods had been on 0.4.9 since 2026-05-05T02:07Z, ~4 min after build #25353560211 completed.
+Origin: 2026-05-07 — session notes claimed the DGX cluster awaited a v0.4.9 rollout;
+pods had been on 0.4.9 since 2026-05-05T02:07Z, ~4 min after the build completed.
 
-## Container Names (deploy/container)
+### 3. Roll out (per target)
 
-| Deployment       | Container  | Image                                    |
-| ---------------- | ---------- | ---------------------------------------- |
-| `arbor-backend`  | `backend`  | `terrenefoundation/arbor-backend:<tag>`  |
-| `arbor-frontend` | `frontend` | `terrenefoundation/arbor-frontend:<tag>` |
+The mechanism is substrate-specific: `kubectl set image` on self-managed K8s, a
+revision or slot swap on a managed-container service. **Use the commands in the
+target's file** — they are written against that deployment's real resource names.
 
-If `set image` errors with "container not found", re-derive: `kubectl get deploy/<name> -n arbor -o jsonpath='{.spec.template.spec.containers[*].name}'`.
+### 4. Verify from outside (MUST)
 
-## Known Failure Modes
+Verify against the deployment's **public URL**, not from inside the control plane. A
+successful rollout command is not evidence that users are being served the new code
+(`rules/deploy-hygiene.md` — "users see it or it's not done").
 
-- **`kubectl: not found`** — `apk add --no-cache kubectl`. Per `specs/k8s-staging-resilience.md` Rule 2, kubectl is not baked into the jumper image; it is reinstalled at runtime and lost on every pod restart.
-- **Cloudflare 1010 / proxy timeout** on long advisory queries — frontend should use `/advisory/stream`, not synchronous `/advisory/query`. See `specs/k8s-staging-resilience.md` Rule 5.
-- **Postgres data wiped after DGX reboot** — PVC `arbor-pgdata` is non-persistent. Full recovery playbook in `specs/k8s-staging-resilience.md`. (The spec file is named `k8s-staging-resilience.md` but applies to the only env — the name predates the discovery that there's no separate staging.)
-- **Ollama cold start ~47s** for first qwen3 inference — model cache may be empty if pod was restarted without PVC.
+```sh
+curl -sS https://<target-domain>/api/health    # expect {"status":"healthy", ...}
+# and load https://<target-domain>/ — landing page renders
+```
+
+**The backend exposes no version endpoint** (`/api/version` → 404), so a healthy
+response does **not** confirm which version is running. Confirming the deployed
+version needs a control-plane reading on that target. Do not report a version as
+deployed on the strength of a health check.
+
+### 5. Rollback if needed
+
+Every target file documents a verified rollback command. Images are immutable and
+retained, so a previously published tag is always a valid destination.
+
+## Secrets and control-plane access
+
+Control-plane credentials for a target (jumper basic auth, cloud IAM, kubeconfig)
+are **never** pasted into a command line, a URL, or an agent transcript — that writes
+a production credential into a durable artifact (`rules/security.md` § "No secrets in
+logs"). If an agent cannot reach a control plane because authentication is missing,
+the correct move is to stop and hand back to the operator, not to embed the
+credential.
+
+## Adding a new deployment
+
+Follow `deploy/targets/README.md` § "What a target file MUST contain". Create the
+target file only when the deployment is real — an empty target file asserts a
+deployment that does not exist (`rules/zero-tolerance.md` Rule 2). Add the row to the
+registry, this table, and `deploy/deployment-config.md`.
+
+When the second deployment lands, re-read `deploy/deployment-config.md` and move
+anything that turns out to be DGX-specific into the DGX file. The split is only
+correct as long as it keeps being checked.
