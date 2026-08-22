@@ -1374,7 +1374,7 @@ wheels = [
 
 [[package]]
 name = "hr-ai-advisory"
-version = "0.4.9"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
